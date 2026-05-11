@@ -33,6 +33,25 @@
       </div>
     </div>
 
+    <div class="gis-card-row">
+      <div class="gis-card">
+        <span class="gis-card-label">当前年份</span>
+        <strong>{{ selectedYear }}年</strong>
+      </div>
+      <div class="gis-card">
+        <span class="gis-card-label">当前模式</span>
+        <strong>{{ activeModeLabel }}</strong>
+      </div>
+      <div class="gis-card">
+        <span class="gis-card-label">空间选择</span>
+        <strong>{{ spatialSelectionLabel }}</strong>
+      </div>
+      <div class="gis-card">
+        <span class="gis-card-label">结果状态</span>
+        <strong>{{ analysisStatusLabel }}</strong>
+      </div>
+    </div>
+
     <!-- 主要内容区 -->
     <main class="main">
       <div class="map-area">
@@ -57,6 +76,40 @@
           </el-button-group>
         </div>
 
+        <div class="toolbar toolbar-export">
+          <el-button-group>
+            <el-button size="small" type="success" :disabled="!hasSpatialGeojson" @click="exportSpatialGeojson">
+              导出空间
+            </el-button>
+            <el-button size="small" type="warning" :disabled="!hasAnalysisResult" @click="exportAnalysisResult">
+              导出结果
+            </el-button>
+          </el-button-group>
+        </div>
+
+        <div class="analysis-status-panel">
+          <div class="status-header">
+            <span>RSEI GIS状态</span>
+            <el-tag size="small" :type="activeFeature ? 'success' : 'info'">{{ activeModeLabel }}</el-tag>
+          </div>
+          <div class="status-row">
+            <span>空间选择</span>
+            <strong>{{ spatialSelectionLabel }}</strong>
+          </div>
+          <div class="status-row">
+            <span>选点坐标</span>
+            <strong>{{ selectedPointLabel }}</strong>
+          </div>
+          <div class="status-row">
+            <span>结果摘要</span>
+            <strong>{{ analysisSummaryLabel }}</strong>
+          </div>
+          <div class="status-row">
+            <span>结果状态</span>
+            <strong>{{ analysisStatusLabel }}</strong>
+          </div>
+        </div>
+
         <!-- 对比分析工具条，仿照landcoverage -->
         <div v-if="showDrawToolbar" class="comparison-toolbar">
           <el-button-group>
@@ -78,26 +131,36 @@
             <el-option v-for="year in years" :key="year" :label="`${year}年`" :value="year" />
           </el-select>
         </div>
-        <div class="legend-panel">
-          <div class="legend-title">RSEI图例</div>
-          <img
-            :src="legendUrl"
-            alt="RSEI图例"
-            class="legend-image"
-            @error="onLegendError"
-          />
-        </div>
         <!-- 添加城市选择提示 -->
         <div v-if="showCitySelect" class="city-select-hint">
           {{ selectedCities.length === 0 ? '请选择第一个城市' : '请选择第二个城市' }}
         </div>
+
+        <div v-if="selectedPointLabel !== '--'" class="map-selection-chip">
+          {{ selectedPointLabel }}
+        </div>
         
         <div class="map" ref="mapDivRef" style="position:relative;">
-          <Basemap :layersConfig="mapLayerConfig" :center="[116.25, 28.25]" :zoom="7" @map-click="onMapClick"
-            @view-ready="onViewReady" />
-          <!-- markerPosition存在时显示marker -->
-          <div v-if="markerPosition" class="map-marker"
-            :style="{ left: markerPosition.left + 'px', top: markerPosition.top + 'px' }"></div>
+          <Basemap
+            :layersConfig="mapLayerConfig"
+            :center="[116.25, 28.25]"
+            :zoom="7"
+            :geojson="geojsonData"
+            :legend-title="legendTitle"
+            @map-click="onMapClick"
+            @view-ready="onViewReady"
+          >
+            <template #legend>
+              <div class="legend-slot">
+                <img
+                  :src="legendUrl"
+                  alt="RSEI图例"
+                  class="legend-image"
+                  @error="onLegendError"
+                />
+              </div>
+            </template>
+          </Basemap>
         </div>
       </div>
 
@@ -185,6 +248,8 @@ const pieData = ref<{ name: string, value: number }[]>([]);
 const barChartData = ref<{ name: string, value: number }[]>([]);
 const isTrendCompareActive = ref(false);
 const markerPosition = ref<{ left: number; top: number } | null>(null);
+const geojsonData = ref<any>(null);
+const selectedPoint = ref<[number, number] | null>(null);
 
 //多点
 const drawingMode = ref<1 | 2 | null>(null);
@@ -317,10 +382,150 @@ const legendUrl = computed(() => {
   return legendCandidates.value[Math.min(legendVariantIndex.value, legendCandidates.value.length - 1)];
 });
 
+const legendTitle = computed(() => `RSEI图例 · ${selectedYear.value}年`);
+const modeLabelMap: Record<'trend' | 'city' | 'draw', string> = {
+  trend: '趋势分析',
+  city: '城市对比',
+  draw: '区域对比'
+};
+
+const activeModeLabel = computed(() => {
+  if (!activeFeature.value) return '待选择模式';
+  return modeLabelMap[activeFeature.value];
+});
+
+const spatialSelectionLabel = computed(() => {
+  if (selectedCities.value.length) {
+    return `${selectedCities.value.length}个城市`;
+  }
+  if (polygon1.value && polygon2.value) {
+    return '双区域已完成';
+  }
+  if (polygon1.value) {
+    return '已绘制区域1';
+  }
+  if (selectedPoint.value) {
+    return '已选点位';
+  }
+  if (activeFeature.value === 'city') return '待选城市';
+  if (activeFeature.value === 'draw') return drawStep.value === 0 ? '待绘制区域1' : '待绘制区域2';
+  if (activeFeature.value === 'trend') return '待选点位';
+  return '未激活';
+});
+
+const selectedPointLabel = computed(() => {
+  if (!selectedPoint.value) return '--';
+  return `${selectedPoint.value[0].toFixed(4)}, ${selectedPoint.value[1].toFixed(4)}`;
+});
+
+const analysisStatusLabel = computed(() => {
+  if (analysisResult.value) return '已生成';
+  if (activeFeature.value) return '分析中';
+  return '待生成';
+});
+
+const analysisSummaryLabel = computed(() => {
+  if (analysisResult.value?.pixel_value !== undefined) {
+    return `像元值 ${analysisResult.value.pixel_value}`;
+  }
+  if (analysisResult.value?.['分析摘要']) {
+    return `${Object.keys(analysisResult.value['分析摘要']).length}项摘要`;
+  }
+  if (analysisResult.value?.trend_analysis) {
+    return `${Object.keys(analysisResult.value.trend_analysis).length}项趋势`;
+  }
+  return '待生成';
+});
+
+const hasSpatialGeojson = computed(() => !!geojsonData.value?.features?.length);
+const hasAnalysisResult = computed(() => !!analysisResult.value);
+
 function onLegendError() {
   if (legendVariantIndex.value < legendCandidates.value.length - 1) {
     legendVariantIndex.value += 1;
   }
+}
+
+function downloadTextFile(filename: string, content: string, mimeType = 'application/json;charset=utf-8') {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function setGeojsonFeatures(features: any[]) {
+  const validFeatures = features.filter(Boolean);
+  geojsonData.value = validFeatures.length
+    ? { type: 'FeatureCollection', features: validFeatures }
+    : null;
+}
+
+function updateTrendPointGeojson(lon: number, lat: number) {
+  setGeojsonFeatures([
+    {
+      type: 'Feature',
+      properties: {
+        type: 'trend-point',
+        year: selectedYear.value
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: [lon, lat]
+      }
+    }
+  ]);
+}
+
+function syncDrawGeojson() {
+  setGeojsonFeatures([
+    polygon1.value ? convertFeatureToGeoJSON(polygon1.value) : null,
+    polygon2.value ? convertFeatureToGeoJSON(polygon2.value) : null
+  ]);
+}
+
+async function syncCityGeojson(cityCodes: string[]) {
+  const res = await fetch('/src/assets/cityRegion.geojson');
+  const data = await res.json();
+  const features = (data.features ?? []).filter((feature: any) => cityCodes.includes(feature.properties?.city_code));
+  geojsonData.value = features.length ? { ...data, features } : null;
+}
+
+function exportSpatialGeojson() {
+  if (!hasSpatialGeojson.value) {
+    ElMessage.warning('当前没有可导出的空间结果');
+    return;
+  }
+
+  downloadTextFile(
+    `rsei_spatial_${selectedYear.value}.geojson`,
+    JSON.stringify(geojsonData.value, null, 2),
+    'application/geo+json;charset=utf-8'
+  );
+  ElMessage.success('空间结果已导出');
+}
+
+function exportAnalysisResult() {
+  if (!hasAnalysisResult.value) {
+    ElMessage.warning('当前没有可导出的分析结果');
+    return;
+  }
+
+  const payload = {
+    year: selectedYear.value,
+    mode: activeFeature.value,
+    generated_at: new Date().toISOString(),
+    selected_point: selectedPoint.value,
+    selected_cities: selectedCities.value,
+    analysis: analysisResult.value
+  };
+
+  downloadTextFile(`rsei_analysis_${selectedYear.value}.json`, JSON.stringify(payload, null, 2));
+  ElMessage.success('分析结果已导出');
 }
 
 // RSEI等级数据
@@ -441,19 +646,6 @@ async function onMapClick(event: any) {
     isTrendCompareActive.value = false;
     setMapCursor('default');
 
-    const mapArea = mapDivRef.value;
-    if (mapArea) {
-      const rect = mapArea.getBoundingClientRect();
-      if (event.screenX !== undefined && event.screenY !== undefined) {
-        markerPosition.value = {
-          left: event.screenX - rect.left,
-          top: event.screenY - rect.top
-        };
-      } else {
-        markerPosition.value = null;
-      }
-    }
-
     if (
       event.latitude === undefined ||
       event.longitude === undefined ||
@@ -466,9 +658,15 @@ async function onMapClick(event: any) {
 
     try {
       dialogVisible.value = false;
+      const lon = Number(Number(event.longitude ?? event.lon).toFixed(6));
+      const lat = Number(Number(event.latitude ?? event.lat).toFixed(6));
+      selectedPoint.value = [lon, lat];
+      analysisResult.value = null;
+      updateTrendPointGeojson(lon, lat);
+
       const payload = {
-        lat: Number(Number(event.latitude ?? event.lat).toFixed(6)),
-        lon: Number(Number(event.longitude ?? event.lon).toFixed(6)),
+        lat,
+        lon,
         year: Number(selectedYear.value)
       };
       console.log('请求payload:', payload);
@@ -506,6 +704,8 @@ async function onMapClick(event: any) {
           time_series: responseData.time_series || {},
           trend_analysis: responseData.trend_analysis || {}
         };
+        analysisResult.value = popupData;
+        showAnalysisDialog.value = true;
 
         if (globalAlertRef.value?.closeAlert) {
           globalAlertRef.value.closeAlert();
@@ -592,7 +792,9 @@ async function fetchCityComparison(cityCodes?: string[]) {
       throw new Error('请求失败: 响应数据格式不正确');
     }
 
+    analysisResult.value = responseData;
     regionCompareData.value = responseData;
+    await syncCityGeojson(codes);
     showRegionDialog.value = true;
   } catch (error: any) {
     console.error('获取城市对比数据失败:', error);
@@ -605,6 +807,8 @@ async function fetchCityComparison(cityCodes?: string[]) {
       console.error('请求配置错误:', error.message);
     }
     ElMessage.error('获取城市数据失败，请确认已点击城市区域且服务可用');
+    analysisResult.value = null;
+    geojsonData.value = null;
     regionCompareData.value = null;
     selectedCities.value = [];
     showRegionDialog.value = false;
@@ -613,10 +817,11 @@ async function fetchCityComparison(cityCodes?: string[]) {
 
 // 开始城市对比
 function handleStartCityCompare() {
-  // 每次点击都清空状态
+  clearAll();
   activeFeature.value = 'city';
   selectedCities.value = [];
   regionCompareData.value = null;
+  analysisResult.value = null;
   showRegionDialog.value = false;
   showCitySelect.value = true;
   setMapCursor('crosshair');
@@ -625,9 +830,11 @@ function handleStartCityCompare() {
 
 // 处理趋势对比分析按钮点击
 function handleTrendCompare() {
+  clearAll();
   activeFeature.value = 'trend';
   isTrendCompareActive.value = true;
   setMapCursor('crosshair');
+  ElMessage.info('请在地图上点选RSEI像元位置');
 }
 
 function setMapCursor(cursor: string) {
@@ -714,7 +921,10 @@ async function analyzeAndShowComparison() {
       throw new Error('请求失败: 响应数据格式不正确');
     }
 
+    analysisResult.value = responseData;
     regionCompareData.value = responseData;
+    syncDrawGeojson();
+    showAnalysisDialog.value = true;
     showRegionDialog.value = true;
     // 新增：分析完成后隐藏绘制工具栏
     showDrawToolbar.value = false;
@@ -759,14 +969,13 @@ async function startDrawing(mode: 1 | 2) {
 
     console.log(`区域${mode}的坐标:`, coords);
     drawingMode.value = null;
+    syncDrawGeojson();
     if (polygon1.value && polygon2.value) {
       await analyzeAndShowComparison();
-      activeFeature.value = null;
       showDrawToolbar.value = false;
       drawStep.value = 0;
-    }
-    if (!(polygon1.value && polygon2.value)) {
-      activeFeature.value = null;
+    } else {
+      ElMessage.info('已完成区域1绘制，请继续绘制区域2');
     }
   }, { clear: shouldClear });
 }
@@ -781,6 +990,15 @@ function clearAll() {
   polygon2Coordinates.value = [];
   drawingMode.value = null;
   showDrawToolbar.value = false;
+  showCitySelect.value = false;
+  selectedCities.value = [];
+  selectedPoint.value = null;
+  markerPosition.value = null;
+  geojsonData.value = null;
+  analysisResult.value = null;
+  regionCompareData.value = null;
+  showAnalysisDialog.value = false;
+  isTrendCompareActive.value = false;
   activeFeature.value = null;
   drawStep.value = 0;
 }
@@ -789,7 +1007,6 @@ function clearAll() {
 watch(isTrendCompareActive, (active) => {
   if (!active) {
     setMapCursor('default');
-    if (activeFeature.value === 'trend') activeFeature.value = null;
   }
 });
 
@@ -840,6 +1057,34 @@ function handleStartDrawCompare() {
   padding: 0;
   height: 64px;
   align-items: center;
+}
+
+.gis-card-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 0 4px 14px 4px;
+}
+
+.gis-card {
+  background: linear-gradient(135deg, rgba(97, 136, 228, 0.12), rgba(58, 139, 237, 0.08));
+  border: 1px solid rgba(97, 136, 228, 0.18);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 68px;
+}
+
+.gis-card-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.gis-card strong {
+  font-size: 15px;
+  color: #0f172a;
 }
 
 .card {
@@ -1008,6 +1253,49 @@ function handleStartDrawCompare() {
   backdrop-filter: blur(8px);
 }
 
+.toolbar-export {
+  left: auto;
+  right: 20px;
+}
+
+.analysis-status-panel {
+  position: absolute;
+  left: 75px;
+  top: 80px;
+  z-index: 10;
+  width: 240px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 12px 14px;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 8px;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+  margin-top: 6px;
+}
+
+.status-row strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+
 // 对比分析工具条样式
 .comparison-toolbar {
   position: absolute;
@@ -1060,6 +1348,19 @@ function handleStartDrawCompare() {
   }
 }
 
+.legend-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 180px;
+}
+
+.legend-image {
+  display: block;
+  max-width: 130px;
+  max-height: 240px;
+}
+
 .map {
   height: calc(100% - 16px);
   background-color: white;
@@ -1068,6 +1369,20 @@ function handleStartDrawCompare() {
   box-shadow: none;
   overflow: hidden;
   margin-top: 8px;
+}
+
+.map-selection-chip {
+  position: absolute;
+  right: 24px;
+  bottom: 22px;
+  z-index: 15;
+  background: rgba(255, 255, 255, 0.96);
+  color: #1e293b;
+  border: 1px solid rgba(97, 136, 228, 0.18);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
 }
 
 .chart-group {
