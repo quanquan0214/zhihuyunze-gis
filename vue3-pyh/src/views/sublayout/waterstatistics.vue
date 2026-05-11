@@ -32,6 +32,24 @@
         </div>
       </div>
     </div>
+    <div class="gis-summary-row">
+      <div class="gis-summary-card">
+        <span class="label">阶段</span>
+        <strong>{{ currentPhaseLabel }}</strong>
+      </div>
+      <div class="gis-summary-card">
+        <span class="label">年份</span>
+        <strong>{{ selectedYear }}年</strong>
+      </div>
+      <div class="gis-summary-card">
+        <span class="label">定位区域</span>
+        <strong>{{ selectedRegionLabel }}</strong>
+      </div>
+      <div class="gis-summary-card">
+        <span class="label">结果状态</span>
+        <strong>{{ resultStatusLabel }}</strong>
+      </div>
+    </div>
     <main class="main">
       <!-- 地图和图表区域 -->
       <div class="map-area">
@@ -55,16 +73,66 @@
             </div>
           </div>
         </div>
+        <div class="toolbar-export">
+          <el-button-group>
+            <el-button size="small" type="success" :disabled="!hasSpatialGeojson" @click="exportSpatialGeojson">导出空间</el-button>
+            <el-button size="small" type="warning" :disabled="!hasSnapshot" @click="exportSnapshot">导出结果</el-button>
+          </el-button-group>
+        </div>
+        <div class="analysis-status-panel">
+          <div class="status-header">
+            <span>水文GIS状态</span>
+            <el-tag size="small" :type="selectedRegionCode ? 'success' : 'info'">{{ currentPhaseLabel }}</el-tag>
+          </div>
+          <div class="status-row">
+            <span>阶段说明</span>
+            <strong>{{ phaseDescription }}</strong>
+          </div>
+          <div class="status-row">
+            <span>定位区域</span>
+            <strong>{{ selectedRegionLabel }}</strong>
+          </div>
+          <div class="status-row">
+            <span>当前水深</span>
+            <strong>{{ selectedData.depth }} m</strong>
+          </div>
+          <div class="status-row">
+            <span>当前水储量</span>
+            <strong>{{ selectedData.volume }} 亿m³</strong>
+          </div>
+        </div>
         <div class="legend-panel">
-          <div class="legend-title">水深图例</div>
+          <div class="legend-title">{{ legendTitle }}</div>
           <img
             :src="legendUrl"
-            alt="水深图例"
+            :alt="legendTitle"
             class="legend-image"
             @error="onLegendError"
           />
         </div>
-        <div class="map">          <Basemap :layersConfig="mapConfig"></Basemap>
+        <div v-if="selectedRegionLabel !== '未选择区域'" class="map-selection-chip">
+          {{ selectedRegionLabel }}
+        </div>
+        <div class="map">
+          <Basemap
+            :layersConfig="mapConfig"
+            :geojson="cityGeojsonOverlay"
+            :legend-title="legendTitle"
+            :show-layer-manager="false"
+            @view-ready="onViewReady"
+            @map-click="onMapClick"
+          >
+            <template #legend>
+              <div class="legend-slot">
+                <img
+                  :src="legendUrl"
+                  :alt="legendTitle"
+                  class="legend-image"
+                  @error="onLegendError"
+                />
+              </div>
+            </template>
+          </Basemap>
         </div>
       </div>
       <div class="chart-group">
@@ -83,6 +151,7 @@
 <script lang="ts" setup>
 import { ref, computed, watch, onMounted } from "vue";
 import { Check } from "@element-plus/icons-vue";
+import { ElMessage } from "element-plus";
 import Basemap from "@/components/baseMap.vue";
 import Timechart from "@/components/timechart.vue";
 import Deepchart from "@/components/deepchart.vue";
@@ -101,6 +170,9 @@ const depthLevelData = ref([]);
 const yearOptions = ref([]);
 const selectedYear = ref("2022");
 const precipitationData = ref<{ year: number, value: string }[]>([]);
+const cityGeojson = ref<any>(null);
+const selectedRegionCode = ref("");
+const selectedRegionName = ref("");
 
 // 图层顺序缓存
 const layerIds = ref<{[key: string]: number}>({});
@@ -125,6 +197,23 @@ const updateMapLayer = async () => {
   
   return layerId ?? 0;  // 如果找不到ID，默认显示第一个图层
 };
+
+function downloadTextFile(filename: string, content: string, mimeType = "application/json;charset=utf-8") {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+async function loadCityRegions() {
+  const res = await fetch("/src/assets/cityRegion.geojson");
+  cityGeojson.value = await res.json();
+}
 
 // 读取CSV并解析
 onMounted(async () => {
@@ -185,6 +274,8 @@ onMounted(async () => {
   if (yearOptions.value.length > 0) {
     selectedYear.value = yearOptions.value[0].value;
   }
+
+  await loadCityRegions();
 });
 
 // 计算当前选中数据
@@ -231,6 +322,37 @@ const selectedPrecipitation = computed(() => {
   const found = precipitationData.value.find(item => item.year === year);
   return found ? found.value : "-";
 });
+
+const currentPhaseLabel = computed(() => phases[selectedPhase.value] ?? "未知阶段");
+const phaseDescriptionMap: Record<string, string> = {
+  up: "湖面扩张阶段，关注水深快速上升区。",
+  max: "丰水位阶段，关注高水深与高水量分布。",
+  down: "退水阶段，关注浅滩暴露与水量回落。",
+  min: "枯水位阶段，关注低水深和敏感区域。"
+};
+const phaseDescription = computed(() => phaseDescriptionMap[phaseMap[selectedPhase.value]] ?? "阶段信息未定义");
+const selectedRegionLabel = computed(() => selectedRegionName.value || "未选择区域");
+const resultStatusLabel = computed(() => selectedData.value.depth !== "-" ? "已生成" : "待生成");
+const legendTitle = computed(() => `水深图例 · ${selectedYear.value}年 · ${currentPhaseLabel.value}`);
+const hasSnapshot = computed(() => selectedData.value.depth !== "-");
+const hasSpatialGeojson = computed(() => !!cityGeojson.value?.features?.length);
+const cityGeojsonOverlay = computed(() => cityGeojson.value);
+const currentSnapshot = computed(() => ({
+  year: Number(selectedYear.value),
+  phase: phaseMap[selectedPhase.value],
+  phase_label: currentPhaseLabel.value,
+  phase_description: phaseDescription.value,
+  region_code: selectedRegionCode.value || null,
+  region_name: selectedRegionName.value || null,
+  metrics: {
+    depth: selectedData.value.depth,
+    area: selectedData.value.area,
+    volume: selectedData.value.volume,
+    precipitation: selectedPrecipitation.value
+  },
+  depth_level_distribution: depthChartData.value,
+  volume_series: chartData.value
+}));
 
 // 地图配置
 const mapConfig = computed(() => {
@@ -302,6 +424,42 @@ const legendUrl = computed(() => {
   return legendCandidates.value[Math.min(legendVariantIndex.value, legendCandidates.value.length - 1)];
 });
 
+function onViewReady() {}
+
+function onMapClick(event: any) {
+  if (!event?.attributes?.city_code) return;
+  selectedRegionCode.value = String(event.attributes.city_code);
+  selectedRegionName.value = String(event.attributes.city_name ?? event.attributes.name ?? event.attributes.city_code);
+  ElMessage.success(`已定位区域：${selectedRegionName.value}`);
+}
+
+function exportSpatialGeojson() {
+  if (!hasSpatialGeojson.value) {
+    ElMessage.warning("当前没有可导出的空间图层");
+    return;
+  }
+
+  downloadTextFile(
+    `hydrology_regions_${selectedYear.value}_${phaseMap[selectedPhase.value]}.geojson`,
+    JSON.stringify(cityGeojson.value, null, 2),
+    "application/geo+json;charset=utf-8"
+  );
+  ElMessage.success("空间图层已导出");
+}
+
+function exportSnapshot() {
+  if (!hasSnapshot.value) {
+    ElMessage.warning("当前没有可导出的阶段结果");
+    return;
+  }
+
+  downloadTextFile(
+    `hydrology_snapshot_${selectedYear.value}_${phaseMap[selectedPhase.value]}.json`,
+    JSON.stringify(currentSnapshot.value, null, 2)
+  );
+  ElMessage.success("阶段结果已导出");
+}
+
 function onLegendError() {
   if (legendVariantIndex.value < legendCandidates.value.length - 1) {
     legendVariantIndex.value += 1;
@@ -322,6 +480,33 @@ watch([selectedYear, selectedPhase], () => {
   overflow: hidden;
   background: #f5f6fa;
   padding: 15px 20px;
+}
+
+.gis-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 0 4px 14px 4px;
+}
+
+.gis-summary-card {
+  background: linear-gradient(135deg, rgba(24, 144, 255, 0.12), rgba(24, 144, 255, 0.04));
+  border: 1px solid rgba(24, 144, 255, 0.18);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gis-summary-card .label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.gis-summary-card strong {
+  color: #0f172a;
+  font-size: 15px;
 }
 
 .header {
@@ -438,6 +623,56 @@ watch([selectedYear, selectedPhase], () => {
   backdrop-filter: blur(8px);
 }
 
+.toolbar-export {
+  position: absolute;
+  right: 32px;
+  top: 232px;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+.analysis-status-panel {
+  position: absolute;
+  left: 24px;
+  top: 24px;
+  z-index: 10;
+  width: 250px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 12px 14px;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+  margin-top: 6px;
+}
+
+.status-row strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+
 .year-select-bar {
   margin-bottom: 16px;
   display: flex;
@@ -518,6 +753,27 @@ watch([selectedYear, selectedPhase], () => {
     max-width: 130px;
     display: block;
   }
+}
+
+.legend-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 180px;
+}
+
+.map-selection-chip {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 12;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(24, 144, 255, 0.18);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #1e293b;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
 }
 
 .chart-group {
