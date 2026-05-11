@@ -12,6 +12,14 @@
             <el-button @click="showToolbar('matrix')" :disabled="analysisMode !== null" size="small"
               type="primary">土地类型转换矩阵</el-button>
           </el-button-group>
+          <el-button-group class="toolbar-export">
+            <el-button @click="exportSelectedRegions" :disabled="!hasAnyRegion" size="small" type="success">
+              导出选区
+            </el-button>
+            <el-button @click="exportAnalysisResult" :disabled="!hasAnalysisResult" size="small" type="warning">
+              导出结果
+            </el-button>
+          </el-button-group>
         </div>
 
         <!-- 对比分析工具条 -->
@@ -44,6 +52,35 @@
           <el-alert :title="drawingPrompt" type="info" :closable="false" />
         </div>
 
+        <div class="analysis-status-panel">
+          <div class="status-header">
+            <span>GIS分析状态</span>
+            <el-tag size="small" :type="analysisMode ? 'success' : 'info'">
+              {{ activeModeLabel }}
+            </el-tag>
+          </div>
+          <div class="status-row">
+            <span>当前年份</span>
+            <strong>{{ selectedYear }}年</strong>
+          </div>
+          <div class="status-row">
+            <span>区域1</span>
+            <strong>{{ drawnRegions.region1 ? '已绘制' : '未绘制' }}</strong>
+          </div>
+          <div class="status-row">
+            <span>区域2</span>
+            <strong>{{ drawnRegions.region2 ? '已绘制' : '未绘制' }}</strong>
+          </div>
+          <div class="status-row" v-if="analysisMode === 'comparison'">
+            <span>对比指标</span>
+            <strong>{{ comparisonMetricLabel }}</strong>
+          </div>
+          <div class="status-row">
+            <span>结果状态</span>
+            <strong>{{ hasAnalysisResult ? '可导出' : '待生成' }}</strong>
+          </div>
+        </div>
+
         <!-- 悬浮的年份选择区域 -->
         <div class="year-selector-float">
           <label>选择年份：</label>
@@ -71,8 +108,25 @@
 
         
         <div class="map">
-          <Basemap :layersConfig="mapLayerConfig" :center="[118.75, 28.25]" :zoom="7" ref="basemapRef"
-            @view-ready="onViewReady" />
+          <Basemap
+            :layersConfig="mapLayerConfig"
+            :center="[118.75, 28.25]"
+            :zoom="7"
+            :legend-title="`土地覆盖图例 · ${selectedYear}年`"
+            ref="basemapRef"
+            @view-ready="onViewReady"
+          >
+            <template #legend>
+              <div class="legend-slot">
+                <img
+                  :src="legendUrl"
+                  alt="土地覆盖图例"
+                  class="legend-image"
+                  @error="onLegendError"
+                />
+              </div>
+            </template>
+          </Basemap>
         </div>
       </div>
     </main>
@@ -149,6 +203,16 @@ const geojsonWriter = new GeoJSON();
 const comparisonMetric = ref('area'); // 默认面积
 const loading = ref(false);
 const legendVariantIndex = ref(0);
+const modeLabelMap: Record<'timeseries' | 'comparison' | 'matrix', string> = {
+  timeseries: '时序分析',
+  comparison: '对比分析',
+  matrix: '转换矩阵'
+};
+const metricLabelMap: Record<string, string> = {
+  area: '面积',
+  change: '变化',
+  anomaly: '异常'
+};
 
 // 监听弹窗内指标切换（来自 LandAnalysisDialog 子组件）
 function onComparisonMetricChange(newMetric: string) {
@@ -220,10 +284,79 @@ const legendUrl = computed(() => {
   return legendCandidates.value[Math.min(legendVariantIndex.value, legendCandidates.value.length - 1)];
 });
 
+const activeModeLabel = computed(() => {
+  if (!analysisMode.value) return '待选择模式';
+  return modeLabelMap[analysisMode.value];
+});
+
+const comparisonMetricLabel = computed(() => metricLabelMap[comparisonMetric.value] ?? comparisonMetric.value);
+const hasAnyRegion = computed(() => !!drawnRegions.value.region1 || !!drawnRegions.value.region2);
+const hasAnalysisResult = computed(() => !!analysisData.value?.data);
+
 function onLegendError() {
   if (legendVariantIndex.value < legendCandidates.value.length - 1) {
     legendVariantIndex.value += 1;
   }
+}
+
+function downloadTextFile(filename: string, content: string, mimeType = 'application/json;charset=utf-8') {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function exportSelectedRegions() {
+  if (!hasAnyRegion.value) {
+    ElMessage.warning('当前没有可导出的选区');
+    return;
+  }
+
+  const featureCollection = {
+    type: 'FeatureCollection',
+    features: [
+      drawnRegions.value.region1
+        ? {
+            type: 'Feature',
+            properties: { name: '区域1', mode: analysisMode.value ?? 'none' },
+            geometry: normalizeRegionGeometry(drawnRegions.value.region1)
+          }
+        : null,
+      drawnRegions.value.region2
+        ? {
+            type: 'Feature',
+            properties: { name: '区域2', mode: analysisMode.value ?? 'none' },
+            geometry: normalizeRegionGeometry(drawnRegions.value.region2)
+          }
+        : null
+    ].filter(Boolean)
+  };
+
+  downloadTextFile(`landcoverage_regions_${selectedYear.value}.geojson`, JSON.stringify(featureCollection, null, 2), 'application/geo+json;charset=utf-8');
+  ElMessage.success('选区已导出');
+}
+
+function exportAnalysisResult() {
+  if (!hasAnalysisResult.value) {
+    ElMessage.warning('当前没有可导出的分析结果');
+    return;
+  }
+
+  const payload = {
+    mode: analysisMode.value,
+    year: selectedYear.value,
+    metric: comparisonMetric.value,
+    generated_at: new Date().toISOString(),
+    data: analysisData.value.data
+  };
+
+  downloadTextFile(`landcoverage_analysis_${analysisMode.value ?? 'result'}_${selectedYear.value}.json`, JSON.stringify(payload, null, 2));
+  ElMessage.success('分析结果已导出');
 }
 
 // 生成年份数组（2000-2022）
@@ -321,6 +454,7 @@ function startPolygonDraw(onComplete: (geojson: any) => Promise<void> | void, op
 function showToolbar(mode: 'timeseries' | 'comparison' | 'matrix') {
   console.log('显示工具栏，模式:', mode);
   analysisMode.value = mode;
+  analysisData.value = { data: null };
   drawnRegions.value = {region1: null, region2: null};
   if (mode === 'timeseries' || mode === 'matrix') {
     nextTick(() => {
@@ -751,6 +885,13 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-export {
+  margin-left: 4px;
 }
 
 // 年份选择器样式
@@ -778,6 +919,57 @@ onBeforeUnmount(() => {
 
 .year-select {
   width: 100px;
+}
+
+.analysis-status-panel {
+  position: absolute;
+  left: 65px;
+  top: 88px;
+  z-index: 10;
+  width: 220px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 12px 14px;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+  margin-top: 6px;
+}
+
+.status-row strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.legend-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 180px;
+}
+
+.legend-image {
+  display: block;
+  max-width: 180px;
+  max-height: 260px;
+  border-radius: 6px;
 }
 
 // 表格区域样式
