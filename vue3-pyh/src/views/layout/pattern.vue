@@ -1,5 +1,23 @@
 <template>
   <div class="container">
+    <div class="gis-summary-row">
+      <div class="gis-summary-card">
+        <span class="label">当前步骤</span>
+        <strong>{{ steps[currentStep]?.label }}</strong>
+      </div>
+      <div class="gis-summary-card">
+        <span class="label">分析区域</span>
+        <strong>{{ activeRegionLabel }}</strong>
+      </div>
+      <div class="gis-summary-card">
+        <span class="label">结果模型</span>
+        <strong>{{ resolvedModelLabel }}</strong>
+      </div>
+      <div class="gis-summary-card">
+        <span class="label">结果状态</span>
+        <strong>{{ resultStatusLabel }}</strong>
+      </div>
+    </div>
    
     <div class="main-content">
       <!-- 左侧面板 -->
@@ -22,15 +40,49 @@
         <!-- 地图区域 -->
         <div class="card map-section">
           <div class="map-container">
+            <div class="map-toolbar">
+              <button type="button" class="btn btn-secondary btn-sm" @click="exportMapGeojson" :disabled="!hasGeojsonResult">导出GeoJSON</button>
+              <button type="button" class="btn btn-secondary btn-sm" @click="exportAnalysisJson" :disabled="!hasAnyAnalysis">导出分析JSON</button>
+            </div>
+            <div class="map-status-panel">
+              <div class="status-head">
+                <span>GIS状态</span>
+                <strong>{{ resolvedModelLabel }}</strong>
+              </div>
+              <div class="status-line">
+                <span>区域</span>
+                <strong>{{ activeRegionLabel }}</strong>
+              </div>
+              <div class="status-line">
+                <span>空间结果</span>
+                <strong>{{ geojsonFeatureCountLabel }}</strong>
+              </div>
+              <div class="status-line">
+                <span>主导因素</span>
+                <strong>{{ mainFactorLabel }}</strong>
+              </div>
+            </div>
             <BaseMap
-              style="height: 100%; width: 100%; border-radius: 8px; border: 1px solid #e0e0e0;"
+              style="flex: 1 1 auto; min-height: 360px; width: 100%; border-radius: 8px; border: 1px solid #e0e0e0;"
               :layers-config="layersConfig"
               :center="[115.9, 28.7]"
               :zoom="7"
               :geojson="geojsonData"
+              :legend-title="legendTitle"
+              :legend-items="legendItems"
               @map-click="onMapClick"
               @view-ready="onViewReady"
             />
+          </div>
+          <div class="feature-info">
+            <h3>地图结果属性</h3>
+            <div v-if="featureInfoEntries.length" class="feature-grid">
+              <div v-for="item in featureInfoEntries" :key="item.key" class="feature-item">
+                <span>{{ item.key }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+            <div v-else class="empty-tip">点击地图结果后显示属性摘要</div>
           </div>
         </div>
        
@@ -47,6 +99,12 @@
             <!-- 步骤表单内容 -->
             <template v-if="tab.value === 'preprocess'">
               <form @submit.prevent="onPreprocess">
+                <div class="param-meaning">
+                  <div class="param-item" v-for="item in preprocessNotes" :key="item.label">
+                    <strong>{{ item.label }}</strong>
+                    <span>{{ item.value }}</span>
+                  </div>
+                </div>
                 <div class="form-group">
                   <label class="form-label">分析年份</label>
                   <select class="form-select" v-model="preprocessForm.year">
@@ -94,6 +152,15 @@
                   开始预处理
                 </button>
               </form>
+              <div class="summary-box" v-if="preprocessSummaryRows.length">
+                <div class="summary-title">预处理参数回显</div>
+                <div class="summary-grid">
+                  <div v-for="item in preprocessSummaryRows" :key="item.label" class="summary-item">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
               <div class="response-area"><pre>{{ preprocessResp }}</pre></div>
             </template>
             <template v-else-if="tab.value === 'regression'">
@@ -125,9 +192,27 @@
                   执行回归分析
                 </button>
               </form>
+              <div class="summary-box" v-if="regressionSummaryRows.length">
+                <div class="summary-title">回归结果摘要</div>
+                <div class="summary-grid">
+                  <div v-for="item in regressionSummaryRows" :key="item.label" class="summary-item">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
               <div class="response-area"><pre>{{ regressionResp }}</pre></div>
             </template>
             <template v-else-if="tab.value === 'download'">
+              <div class="summary-box" v-if="downloadSummaryRows.length">
+                <div class="summary-title">结果交付清单</div>
+                <div class="summary-grid">
+                  <div v-for="item in downloadSummaryRows" :key="item.label" class="summary-item">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
               <div style="display: grid; gap: 20px;">
                 <div style="padding: 20px; border: 2px solid #e5e7eb; border-radius: 12px;">
                   <h4 style="margin-bottom: 15px; color: #374151;">空间数据文件</h4>
@@ -200,7 +285,28 @@
                   <span>🎨</span>
                   生成可视化地图
                 </button>
+                <button type="button" class="btn btn-secondary" style="margin-left: 12px;" @click="runMechanismAnalysis" :disabled="!stepStatus[1]">
+                  生成机制解读
+                </button>
               </form>
+              <div class="summary-box" v-if="visualSummaryRows.length">
+                <div class="summary-title">地图回显摘要</div>
+                <div class="summary-grid">
+                  <div v-for="item in visualSummaryRows" :key="item.label" class="summary-item">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
+              <div class="summary-box" v-if="analysisSummaryRows.length">
+                <div class="summary-title">机制分析结论</div>
+                <div class="summary-grid">
+                  <div v-for="item in analysisSummaryRows" :key="item.label" class="summary-item">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
               <div class="response-area"><pre>{{ visualizeResp }}</pre></div>
             </template>
             <div class="form-mask" v-if="currentStep < idx">
@@ -219,7 +325,7 @@
 
 <script setup>
 import api from '@/utils/request'
-import { ref, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import BaseMap from '@/components/baseMap.vue'
 
 const tabs = [
@@ -275,10 +381,17 @@ const regressionForm = reactive({
 const regressionResp = ref('')
 const downloadForm = reactive({ year: '2020', region: 'NC', model: 'OLS' })
 const downloadResp = ref('')
+const csvResp = ref('')
 const visualizeForm = reactive({ year: '2020', region: 'NC', model: 'OLS' })
 const visualizeResp = ref('')
 const geojsonData = ref(null)
 const selectedFeature = ref(null)
+const mechanismAnalysis = ref(null)
+const preprocessedPayload = ref(null)
+const regressionPayload = ref(null)
+const preprocessResultMeta = ref(null)
+const regressionResolvedModel = ref('')
+const exportRegionGeojson = ref(null)
 
 const steps = [
   { label: '数据预处理', value: 'preprocess' },
@@ -292,12 +405,221 @@ const stepStatus = reactive([false, false, false, false])
 function onViewReady() {}
 const layersConfig = []
 
+const regionLabelMap = Object.fromEntries(cities.map((item) => [item.value, item.label]))
+const modelLabelMap = {
+  best: '自动选择最佳模型',
+  OLS: '普通最小二乘法 (OLS)',
+  SLM: '空间滞后模型 (SLM)',
+  SEM: '空间误差模型 (SEM)'
+}
+const factorLabelMap = {
+  lucc_numeric: '土地利用',
+  temperature: '温度',
+  rainfall: '降水',
+  fvc: '植被覆盖度',
+  rsei: 'RSEI',
+  x: '经度',
+  y: '纬度',
+  resid_class: '残差等级',
+  std_resid: '标准残差',
+  predicted: '预测值',
+  residuals: '残差'
+}
+const legendClassItems = [
+  { label: '极低残差 (≤ -3)', color: '#08306b' },
+  { label: '较低残差 (-3 ~ -2)', color: '#2171b5' },
+  { label: '偏低残差 (-2 ~ -1)', color: '#6baed6' },
+  { label: '中等残差 (-1 ~ 1)', color: '#f7f7f7' },
+  { label: '偏高残差 (1 ~ 2)', color: '#fdae6b' },
+  { label: '较高残差 (2 ~ 3)', color: '#fb6a4a' },
+  { label: '极高残差 (≥ 3)', color: '#cb181d' }
+]
+
+function formatValue(value) {
+  if (value === null || value === undefined || value === '') return '--'
+  if (Array.isArray(value)) return value.map((item) => formatValue(item)).join(', ')
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)))
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch (error) {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
+function displayFactorName(name) {
+  return factorLabelMap[name] || name || '--'
+}
+
+const activeRegionLabel = computed(() => regionLabelMap[preprocessForm.region] || preprocessForm.region || '--')
+const resolvedModelLabel = computed(() => modelLabelMap[regressionResolvedModel.value || regressionForm.model] || (regressionResolvedModel.value || regressionForm.model || '--'))
+const hasGeojsonResult = computed(() => geojsonData.value?.type === 'FeatureCollection' && Array.isArray(geojsonData.value.features))
+const hasAnyAnalysis = computed(() => !!(preprocessedPayload.value || regressionPayload.value || mechanismAnalysis.value || hasGeojsonResult.value))
+const geojsonFeatureCountLabel = computed(() => {
+  if (!hasGeojsonResult.value) return '未生成'
+  return `${geojsonData.value.features.length} 个要素`
+})
+const mainFactorLabel = computed(() => {
+  const factor = mechanismAnalysis.value?.main_conclusion?.primary_influence_factor
+  return displayFactorName(factor)
+})
+const resultStatusLabel = computed(() => {
+  if (mechanismAnalysis.value) return '机制分析完成'
+  if (hasGeojsonResult.value) return '空间结果已生成'
+  if (regressionPayload.value) return '回归完成'
+  if (preprocessedPayload.value) return '预处理完成'
+  return '待开始'
+})
+const legendTitle = computed(() => (hasGeojsonResult.value ? '标准化残差分级' : '空间分析图例'))
+const legendItems = computed(() => (hasGeojsonResult.value ? legendClassItems : []))
+const preprocessNotes = computed(() => [
+  { label: '分析年份', value: `${preprocessForm.year} 年` },
+  { label: '目标区域', value: activeRegionLabel.value },
+  { label: '空间分辨率', value: `${preprocessResultMeta.value?.resolution || preprocessForm.res}` },
+  { label: '坐标系统', value: preprocessResultMeta.value?.coordinate_system || preprocessForm.src },
+  { label: '重采样', value: preprocessResultMeta.value?.reclass_method || preprocessForm.resuml }
+])
+const preprocessSummaryRows = computed(() => {
+  if (!preprocessResp.value) return []
+  return [
+    { label: '年份', value: `${preprocessForm.year} 年` },
+    { label: '区域', value: activeRegionLabel.value },
+    { label: '分辨率', value: preprocessResultMeta.value?.resolution || preprocessForm.res },
+    { label: '坐标系', value: preprocessResultMeta.value?.coordinate_system || preprocessForm.src },
+    { label: '重采样', value: preprocessResultMeta.value?.reclass_method || preprocessForm.resuml },
+    { label: '返回行数', value: Array.isArray(preprocessedPayload.value) ? preprocessedPayload.value.length : 0 }
+  ]
+})
+const regressionSummaryRows = computed(() => {
+  const bestModel = regressionPayload.value?.best_model || {}
+  if (!regressionResp.value) return []
+  return [
+    { label: '模型', value: resolvedModelLabel.value },
+    { label: 'R²', value: formatValue(bestModel.r_squared) },
+    { label: '因变量', value: displayFactorName(bestModel.parameters?.dependent) },
+    { label: '自变量', value: Array.isArray(bestModel.parameters?.independent) ? bestModel.parameters.independent.map(displayFactorName).join('、') : '--' },
+    { label: '样本量', value: formatValue(bestModel.diagnostics?.sample_size) }
+  ]
+})
+const downloadSummaryRows = computed(() => {
+  if (!regressionPayload.value) return []
+  return [
+    { label: '当前模型', value: resolvedModelLabel.value },
+    { label: '输出年份', value: `${downloadForm.year} 年` },
+    { label: '输出区域', value: activeRegionLabel.value },
+    { label: '空间文件', value: 'Shapefile' },
+    { label: '表格文件', value: 'CSV' }
+  ]
+})
+const visualSummaryRows = computed(() => {
+  if (!hasGeojsonResult.value) return []
+  return [
+    { label: '输出模型', value: resolvedModelLabel.value },
+    { label: '年份', value: `${visualizeForm.year} 年` },
+    { label: '区域', value: activeRegionLabel.value },
+    { label: '要素数量', value: geojsonFeatureCountLabel.value },
+    { label: '图例', value: legendTitle.value }
+  ]
+})
+const analysisSummaryRows = computed(() => {
+  const analysis = mechanismAnalysis.value
+  if (!analysis?.main_conclusion) return []
+  const factors = analysis.factors_analysis || {}
+  const sortedFactors = Object.entries(factors)
+    .sort((a, b) => (Number(b[1]?.abs_mean || 0) - Number(a[1]?.abs_mean || 0)))
+    .slice(0, 3)
+    .map(([name, stats]) => `${displayFactorName(name)} (${formatValue(stats?.abs_mean)})`)
+    .join('、')
+  return [
+    { label: '主导因素', value: displayFactorName(analysis.main_conclusion.primary_influence_factor) },
+    { label: '影响强度', value: formatValue(analysis.main_conclusion.influence_strength) },
+    { label: '分析精度', value: `${Number((Number(analysis.main_conclusion.precision || 0) * 100).toFixed(2))}%` },
+    { label: '机制解读', value: analysis.main_conclusion.interpretation || '--' },
+    { label: 'Top3 因子', value: sortedFactors || '--' }
+  ]
+})
+const featureInfoEntries = computed(() => {
+  const attrs = selectedFeature.value
+  if (!attrs || typeof attrs !== 'object') return []
+
+  const preferredOrder = ['name', 'id', 'region', 'year', 'rsei', 'predicted', 'residuals', 'std_resid', 'resid_class', 'x', 'y']
+  return Object.entries(attrs)
+    .filter(([key]) => key !== 'geometry')
+    .sort((a, b) => {
+      const ai = preferredOrder.indexOf(a[0])
+      const bi = preferredOrder.indexOf(b[0])
+      const av = ai === -1 ? preferredOrder.length : ai
+      const bv = bi === -1 ? preferredOrder.length : bi
+      return av - bv
+    })
+    .slice(0, 10)
+    .map(([key, value]) => ({
+      key: displayFactorName(key),
+      value: formatValue(value)
+    }))
+})
+
+function downloadTextFile(filename, content, mimeType = 'application/json;charset=utf-8') {
+  const blob = new Blob([content], { type: mimeType })
+  const url = window.URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  window.URL.revokeObjectURL(url)
+}
+
+function resetResultState() {
+  stepStatus[1] = false
+  stepStatus[2] = false
+  stepStatus[3] = false
+  regressionResp.value = ''
+  downloadResp.value = ''
+  csvResp.value = ''
+  visualizeResp.value = ''
+  mechanismAnalysis.value = null
+  regressionPayload.value = null
+  geojsonData.value = null
+  exportRegionGeojson.value = null
+  selectedFeature.value = null
+  regressionResolvedModel.value = ''
+}
+
+function exportMapGeojson() {
+  const payload = exportRegionGeojson.value || geojsonData.value
+  if (!payload) return
+  downloadTextFile('机制分析结果.geojson', JSON.stringify(payload, null, 2), 'application/geo+json;charset=utf-8')
+}
+
+function exportAnalysisJson() {
+  const payload = {
+    preprocess: {
+      form: { ...preprocessForm },
+      meta: preprocessResultMeta.value,
+      data: preprocessedPayload.value
+    },
+    regression: regressionPayload.value,
+    visualization: exportRegionGeojson.value,
+    mechanism: mechanismAnalysis.value,
+    selectedFeature: selectedFeature.value,
+    exportedAt: new Date().toISOString()
+  }
+  downloadTextFile('机制分析汇总.json', JSON.stringify(payload, null, 2))
+}
+
 function onPreprocessFileChange(e) {
   preprocessForm.file = e.target.files[0]
 }
 
 async function onPreprocess() {
   try {
+    resetResultState()
     const payload = {
       year: preprocessForm.year,
       region: preprocessForm.region,
@@ -310,6 +632,8 @@ async function onPreprocess() {
       transformRequest: [(data) => JSON.stringify(data)]
     })
     preprocessResp.value = JSON.stringify(data, null, 2)
+    preprocessedPayload.value = data.data || null
+    preprocessResultMeta.value = data.parameters || null
     // 同步到后续步骤的表单
     regressionForm.year = payload.year
     regressionForm.region = payload.region
@@ -317,6 +641,8 @@ async function onPreprocess() {
     downloadForm.region = payload.region
     visualizeForm.year = payload.year
     visualizeForm.region = payload.region
+    downloadForm.model = regressionForm.model === 'best' ? 'OLS' : regressionForm.model
+    visualizeForm.model = regressionForm.model === 'best' ? 'OLS' : regressionForm.model
     stepStatus[0] = true
     currentStep.value = 1
     currentTab.value = tabs[1].value
@@ -326,6 +652,8 @@ async function onPreprocess() {
 }
 async function onRegression() {
   try {
+    resetResultState()
+    stepStatus[0] = true
     if (regressionForm.independent_vars.length === 0) {
       regressionForm.independent_vars = ['lucc_numeric', 'temperature', 'rainfall', 'fvc'];
     }
@@ -338,12 +666,15 @@ async function onRegression() {
       independent_vars: regressionForm.independent_vars
     }
 
-    console.log('Regression payload:', payload);
-
     const data = await api.post('/api/spatial-regression', payload, {
       headers: { 'Content-Type': 'application/json' }
     })
     regressionResp.value = JSON.stringify(data, null, 2)
+    regressionPayload.value = data
+    const resolvedModel = data?.best_model?.type || payload.model
+    regressionResolvedModel.value = resolvedModel
+    downloadForm.model = resolvedModel
+    visualizeForm.model = resolvedModel
     stepStatus[1] = true
     currentStep.value = 2
     currentTab.value = tabs[2].value
@@ -354,13 +685,14 @@ async function onRegression() {
 }
 async function onDownload(type) {
   try {
+    const resolvedModel = regressionResolvedModel.value || downloadForm.model
     if(type==='shapefile') {
-      const { year, region, model } = downloadForm;
-      const res = await api.get(`/api/download-shapefile?year=${year}&region=${region}&model=${model}`, { responseType: 'blob' })
+      const { year, region } = downloadForm;
+      const res = await api.get(`/api/download-shapefile?year=${year}&region=${region}&model=${resolvedModel}`, { responseType: 'blob' })
       const url = window.URL.createObjectURL(res)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${model}_results.zip`
+      a.download = `${resolvedModel}_results.zip`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -384,33 +716,57 @@ async function onDownload(type) {
 }
 async function onVisualize() {
   try {
-    const { year, region, model } = visualizeForm;
+    const model = regressionResolvedModel.value || visualizeForm.model
+    visualizeForm.model = model
+    const { year, region } = visualizeForm;
     const data = await api.get(`/api/results/visualize?year=${year}&region=${region}&model=${model}`)
     visualizeResp.value = JSON.stringify(data, null, 2)
+    mechanismAnalysis.value = null
+    selectedFeature.value = null
     stepStatus[2] = true
+    stepStatus[3] = true
     currentStep.value = 3
     currentTab.value = tabs[3].value
     const geo = data.geojson || data;
     if (geo && geo.type === 'FeatureCollection' && Array.isArray(geo.features)) {
-      geo.features.forEach(f => {
-        const v = parseFloat(f.properties.std_resid);
-        if (v < -3) f.properties.resid_class = '1';
-        else if (v < -2) f.properties.resid_class = '2';
-        else if (v < -1) f.properties.resid_class = '3';
-        else if (v < 1) f.properties.resid_class = '4';
-        else if (v < 2) f.properties.resid_class = '5';
-        else if (v < 3) f.properties.resid_class = '6';
-        else f.properties.resid_class = '7';
-        
-        console.log(`Feature ${f.id}: std_resid = ${v}, resid_class = ${f.properties.resid_class}`);
-      });
+      geo.features.forEach((feature) => {
+        const properties = feature.properties || {}
+        const value = Number.parseFloat(properties.std_resid)
+        if (Number.isNaN(value)) properties.resid_class = '4'
+        else if (value < -3) properties.resid_class = '1'
+        else if (value < -2) properties.resid_class = '2'
+        else if (value < -1) properties.resid_class = '3'
+        else if (value < 1) properties.resid_class = '4'
+        else if (value < 2) properties.resid_class = '5'
+        else if (value < 3) properties.resid_class = '6'
+        else properties.resid_class = '7'
+        feature.properties = properties
+      })
       geojsonData.value = geo;
+      exportRegionGeojson.value = geo
     } else {
       geojsonData.value = null;
       visualizeResp.value += '\n[未检测到标准GeoJSON，无法渲染地图]';
     }
   } catch (e) {
     visualizeResp.value = e?.message || String(e)
+  }
+}
+async function runMechanismAnalysis() {
+  try {
+    const payload = {
+      year: visualizeForm.year,
+      region: visualizeForm.region
+    }
+    const data = await api.post('/api/SRanalysis', payload, {
+      headers: { 'Content-Type': 'application/json' }
+    })
+    mechanismAnalysis.value = data
+    const current = visualizeResp.value ? `${visualizeResp.value}\n\n` : ''
+    visualizeResp.value = `${current}${JSON.stringify(data, null, 2)}`
+  } catch (e) {
+    const message = e?.response?.data?.message || e?.message || String(e)
+    visualizeResp.value = `${visualizeResp.value}\n\n机制分析失败：${message}`
   }
 }
 function onMapClick(event) {
@@ -457,6 +813,29 @@ body {
   padding: 0;
   min-height: 100vh;
 }
+.gis-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.gis-summary-card {
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(49, 130, 206, 0.92) 0%, rgba(37, 99, 235, 0.92) 100%);
+  color: #fff;
+  box-shadow: 0 16px 30px rgba(37, 99, 235, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gis-summary-card .label {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.78);
+}
+.gis-summary-card strong {
+  font-size: 1.05rem;
+}
 .header {
   text-align: center;
   margin-bottom: 30px;
@@ -476,10 +855,10 @@ body {
   display: grid;
   grid-template-columns: 2.5fr 1fr;
   gap: 30px;
-  height: 100vh;
+  height: calc(100vh - 120px);
 }
 .left-panel, .right-panel {
-  height: 100vh;
+  height: 100%;
   min-height: 0;
 }
 .left-panel {
@@ -563,18 +942,55 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
+  gap: 16px;
+  min-height: 0;
 }
 .map-container {
   flex: 1;
   background: #f8fafc;
   border-radius: 15px;
-  border: 2px dashed #cbd5e1;
+  border: 1px solid #dbeafe;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 20px;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
   position: relative;
   overflow: hidden;
+  min-height: 0;
+}
+.map-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.map-status-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #eef2ff 100%);
+  border: 1px solid #c7d2fe;
+}
+.status-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #1e3a8a;
+  font-weight: 700;
+}
+.status-line {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #475569;
+}
+.status-line strong {
+  color: #0f172a;
 }
 .feature-info {
   background: #f1f5f9;
@@ -586,6 +1002,32 @@ body {
   color: #1e293b;
   margin-bottom: 15px;
   font-size: 1.1rem;
+}
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.feature-item {
+  padding: 12px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.feature-item span {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+.feature-item strong {
+  color: #0f172a;
+  word-break: break-word;
+}
+.empty-tip {
+  color: #64748b;
+  font-size: 0.92rem;
 }
 .step-content {
   display: none;
@@ -726,6 +1168,10 @@ body {
   background: #e2e8f0;
   color: #475569;
 }
+.btn-sm {
+  padding: 9px 14px;
+  font-size: 0.85rem;
+}
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -742,8 +1188,71 @@ body {
   max-height: 200px;
   overflow-y: auto;
 }
+.response-area pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .response-area:empty {
   display: none;
+}
+.param-meaning {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.param-item {
+  padding: 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+  border: 1px solid #dbeafe;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.param-item strong {
+  color: #1d4ed8;
+  font-size: 0.88rem;
+}
+.param-item span {
+  color: #475569;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.summary-box {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #f8fbff;
+  border: 1px solid #dbeafe;
+}
+.summary-title {
+  margin-bottom: 12px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1e3a8a;
+}
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.summary-item {
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.summary-item span {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+.summary-item strong {
+  color: #0f172a;
+  word-break: break-word;
 }
 .progress-bar {
   width: 100%;
@@ -770,9 +1279,13 @@ body {
   border-color: #ef4444;
 }
 @media (max-width: 1024px) {
+  .gis-summary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .main-content {
     grid-template-columns: 1fr;
-    grid-template-rows: 300px 1fr;
+    grid-template-rows: minmax(520px, 56vh) 1fr;
+    height: auto;
   }
   .process-indicator {
     flex-wrap: wrap;
@@ -782,16 +1295,28 @@ body {
     flex: 1;
     min-width: 80px;
   }
+  .left-panel, .right-panel {
+    height: auto;
+  }
 }
 @media (max-width: 768px) {
   .container {
     padding: 15px;
+  }
+  .gis-summary-row {
+    grid-template-columns: 1fr;
   }
   .header h1 {
     font-size: 2rem;
   }
   .left-panel, .right-panel {
     padding: 20px;
+  }
+  .map-status-panel,
+  .summary-grid,
+  .param-meaning,
+  .feature-grid {
+    grid-template-columns: 1fr;
   }
 }
 .card {
