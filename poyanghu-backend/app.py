@@ -51,7 +51,7 @@ LUCC_DATA_DIR = 'F:/pylake/totaldata/GLC_FCS30/merged'
 os.makedirs(LUCC_DATA_DIR, exist_ok=True)
 # Configuration
 UPLOAD_FOLDER_IM = 'F:/pylake/totaldata/city'
-ALLOWED_EXTENSIONS = {'shp', 'shx', 'dbf'}
+ALLOWED_EXTENSIONS = {'shp', 'shx', 'dbf', 'prj', 'geojson', 'json'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER_IM
 
 # Helper function for predict endpoint
@@ -1159,51 +1159,67 @@ def download_csv():
 
 @app.route('/api/upload/region', methods=['POST'])
 def upload_region():
-    """Upload a shapefile and return its GeoJSON content"""
+    """Upload a shapefile set or GeoJSON and return its GeoJSON content"""
     region_code = request.form.get('region_code')
-    if not region_code or 'shp_file' not in request.files:
-        return jsonify({"status": "error", "message": "Missing region_code or shp_file"}), 400
+    region_name = request.form.get('region_name')
+    region_dir = None
+    if not region_code:
+        return jsonify({"status": "error", "message": "Missing region_code"}), 400
 
     region_code = secure_filename(region_code)
-    shp_file = request.files['shp_file']
-    if not allowed_file(shp_file.filename):
-        return jsonify({"status": "error", "message": "Invalid shapefile format"}), 400
+    if not region_code:
+        return jsonify({"status": "error", "message": "Invalid region_code"}), 400
+
+    shp_file = request.files.get('shp_file')
+    geojson_file = request.files.get('geojson_file')
+
+    if not shp_file and not geojson_file:
+        return jsonify({"status": "error", "message": "Missing shp_file or geojson_file"}), 400
+
+    primary_file = geojson_file or shp_file
+    if not primary_file or not allowed_file(primary_file.filename):
+        return jsonify({"status": "error", "message": "Invalid region file format"}), 400
 
     try:
         # Create unique directory for region
         region_dir = os.path.join(app.config['UPLOAD_FOLDER'], region_code)
         os.makedirs(region_dir, exist_ok=True)
 
-        # Save shapefile
-        shp_path = os.path.join(region_dir, f"{region_code}.shp")
-        shp_file.save(shp_path)
+        if geojson_file:
+            region_path = os.path.join(region_dir, f"{region_code}.geojson")
+            geojson_file.save(region_path)
+        else:
+            # Save shapefile
+            region_path = os.path.join(region_dir, f"{region_code}.shp")
+            shp_file.save(region_path)
 
-        # Save optional files
-        for ext in ['shx', 'dbf', 'prj']:
-            if f"{ext}_file" in request.files:
-                file = request.files[f"{ext}_file"]
+            # Save optional files
+            for ext in ['shx', 'dbf', 'prj']:
+                file = request.files.get(f"{ext}_file")
                 if file and allowed_file(file.filename):
                     file.save(os.path.join(region_dir, f"{region_code}.{ext}"))
 
-        # Validate shapefile and convert to GeoJSON
-        gdf = gpd.read_file(shp_path)
+        # Validate vector file and convert to GeoJSON
+        gdf = gpd.read_file(region_path)
         if gdf.empty:
             shutil.rmtree(region_dir)
-            return jsonify({"status": "error", "message": "Empty shapefile"}), 400
+            return jsonify({"status": "error", "message": "Empty region file"}), 400
 
         geojson_data = json.loads(gdf.to_crs(epsg=4326).to_json())
 
         # Dynamically update SRService.city_shapes
-        SRService.city_shapes[region_code] = shp_path
+        SRService.city_shapes[region_code] = region_path
 
         return jsonify({
             "status": "success",
-            "message": "Shapefile uploaded and processed successfully",
+            "message": "Region uploaded and processed successfully",
             "region_code": region_code,
+            "region_name": region_name or region_code,
+            "source_type": "geojson" if geojson_file else "shapefile",
             "geojson": geojson_data  # 直接返回GeoJSON数据
         }), 200
     except Exception as e:
-        if os.path.exists(region_dir):
+        if region_dir and os.path.exists(region_dir):
             shutil.rmtree(region_dir)
         return jsonify({"status": "error", "message": str(e)}), 500
 

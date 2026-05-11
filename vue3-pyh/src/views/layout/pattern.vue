@@ -67,7 +67,7 @@
               :layers-config="layersConfig"
               :center="[115.9, 28.7]"
               :zoom="7"
-              :geojson="geojsonData"
+              :geojson="displayGeojson"
               :legend-title="legendTitle"
               :legend-items="legendItems"
               @map-click="onMapClick"
@@ -114,7 +114,7 @@
                 <div class="form-group">
                   <label class="form-label">目标区域</label>
                   <select class="form-select" v-model="preprocessForm.region">
-                    <option v-for="c in cities" :key="c.value" :value="c.value">{{ c.label }}</option>
+                    <option v-for="c in regionOptions" :key="c.value" :value="c.value">{{ c.label }}</option>
                   </select>
                 </div>
                 <div class="form-group">
@@ -140,18 +140,44 @@
                 <div class="form-group">
                   <label class="form-label">上传区域文件（shp/geojson）</label>
                   <div class="file-upload">
-                    <input type="file" @change="onPreprocessFileChange" accept=".shp,.geojson">
+                    <input type="file" multiple @change="onPreprocessFileChange" accept=".shp,.shx,.dbf,.prj,.geojson,.json">
                     <div class="file-upload-button">
                       <span>📁</span>
                       选择文件
                     </div>
                   </div>
+                  <div class="file-upload-tip">支持单个 GeoJSON，或一次性选择同名的 `.shp + .shx + .dbf (+ .prj)` 文件组。</div>
+                  <div v-if="selectedRegionFileNames.length" class="selected-file-list">
+                    <span v-for="name in selectedRegionFileNames" :key="name" class="file-chip">{{ name }}</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">自定义区域编码</label>
+                  <input type="text" class="form-input" v-model="customRegionCode" placeholder="留空则根据文件名自动生成，如 CUSTOM_NC_01">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">自定义区域名称</label>
+                  <input type="text" class="form-input" v-model="customRegionName" placeholder="例如：核心保护区 / 自定义研究区">
+                </div>
+                <div class="upload-action-row">
+                  <button type="button" class="btn btn-secondary" @click="onUploadRegion" :disabled="!selectedRegionFiles.length">
+                    上传并应用区域
+                  </button>
                 </div>
                 <button type="submit" class="btn btn-primary" :disabled="stepStatus[0]">
                   <span>🔄</span>
                   开始预处理
                 </button>
               </form>
+              <div class="summary-box" v-if="regionUploadRows.length">
+                <div class="summary-title">自定义区域回显</div>
+                <div class="summary-grid">
+                  <div v-for="item in regionUploadRows" :key="item.label" class="summary-item">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
               <div class="summary-box" v-if="preprocessSummaryRows.length">
                 <div class="summary-title">预处理参数回显</div>
                 <div class="summary-grid">
@@ -161,6 +187,7 @@
                   </div>
                 </div>
               </div>
+              <div class="response-area"><pre>{{ regionUploadResp }}</pre></div>
               <div class="response-area"><pre>{{ preprocessResp }}</pre></div>
             </template>
             <template v-else-if="tab.value === 'regression'">
@@ -352,6 +379,11 @@ const cities = [
   { label: '上饶市', value: 'SR' },
   { label: '鹰潭市', value: 'YT' }
 ]
+const customRegionOptions = ref([])
+const selectedRegionFiles = ref([])
+const customRegionCode = ref('')
+const customRegionName = ref('')
+const regionUploadResp = ref('')
 const resampleMethods = [
   'nearest', 'bilinear', 'cubic', 'lanczos', 'average', 'mode', 'max', 'min', 'med', 'q1', 'q3', 'linear'
 ]
@@ -392,6 +424,8 @@ const regressionPayload = ref(null)
 const preprocessResultMeta = ref(null)
 const regressionResolvedModel = ref('')
 const exportRegionGeojson = ref(null)
+const uploadedRegionMeta = ref(null)
+const uploadedRegionGeojson = ref(null)
 
 const steps = [
   { label: '数据预处理', value: 'preprocess' },
@@ -405,7 +439,7 @@ const stepStatus = reactive([false, false, false, false])
 function onViewReady() {}
 const layersConfig = []
 
-const regionLabelMap = Object.fromEntries(cities.map((item) => [item.value, item.label]))
+const regionOptions = computed(() => [...cities, ...customRegionOptions.value])
 const modelLabelMap = {
   best: '自动选择最佳模型',
   OLS: '普通最小二乘法 (OLS)',
@@ -455,13 +489,43 @@ function displayFactorName(name) {
   return factorLabelMap[name] || name || '--'
 }
 
-const activeRegionLabel = computed(() => regionLabelMap[preprocessForm.region] || preprocessForm.region || '--')
+function sanitizeRegionCode(value) {
+  return String(value || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 24)
+}
+
+function getSelectedFileList(files) {
+  return Array.from(files || [])
+}
+
+function getUploadedRegionCode() {
+  const firstFile = selectedRegionFiles.value[0]
+  const baseName = firstFile?.name ? firstFile.name.replace(/\.[^.]+$/, '') : ''
+  const raw = customRegionCode.value || baseName || `CUSTOM_${Date.now().toString().slice(-6)}`
+  return sanitizeRegionCode(raw) || `CUSTOM_${Date.now().toString().slice(-6)}`
+}
+
+function getUploadedRegionName() {
+  const firstFile = selectedRegionFiles.value[0]
+  const baseName = firstFile?.name ? firstFile.name.replace(/\.[^.]+$/, '') : ''
+  return (customRegionName.value || baseName || getUploadedRegionCode()).trim()
+}
+
+const displayGeojson = computed(() => geojsonData.value || uploadedRegionGeojson.value)
+const selectedRegionFileNames = computed(() => selectedRegionFiles.value.map((file) => file.name))
+const activeRegionLabel = computed(() => regionOptions.value.find((item) => item.value === preprocessForm.region)?.label || preprocessForm.region || '--')
 const resolvedModelLabel = computed(() => modelLabelMap[regressionResolvedModel.value || regressionForm.model] || (regressionResolvedModel.value || regressionForm.model || '--'))
 const hasGeojsonResult = computed(() => geojsonData.value?.type === 'FeatureCollection' && Array.isArray(geojsonData.value.features))
-const hasAnyAnalysis = computed(() => !!(preprocessedPayload.value || regressionPayload.value || mechanismAnalysis.value || hasGeojsonResult.value))
+const hasAnyAnalysis = computed(() => !!(preprocessedPayload.value || regressionPayload.value || mechanismAnalysis.value || hasGeojsonResult.value || uploadedRegionMeta.value))
 const geojsonFeatureCountLabel = computed(() => {
-  if (!hasGeojsonResult.value) return '未生成'
-  return `${geojsonData.value.features.length} 个要素`
+  if (hasGeojsonResult.value) return `${geojsonData.value.features.length} 个要素`
+  if (uploadedRegionGeojson.value?.type === 'FeatureCollection' && Array.isArray(uploadedRegionGeojson.value.features)) {
+    return `${uploadedRegionGeojson.value.features.length} 个边界要素`
+  }
+  return '未生成'
 })
 const mainFactorLabel = computed(() => {
   const factor = mechanismAnalysis.value?.main_conclusion?.primary_influence_factor
@@ -472,6 +536,7 @@ const resultStatusLabel = computed(() => {
   if (hasGeojsonResult.value) return '空间结果已生成'
   if (regressionPayload.value) return '回归完成'
   if (preprocessedPayload.value) return '预处理完成'
+  if (uploadedRegionMeta.value) return '自定义区域已加载'
   return '待开始'
 })
 const legendTitle = computed(() => (hasGeojsonResult.value ? '标准化残差分级' : '空间分析图例'))
@@ -479,15 +544,26 @@ const legendItems = computed(() => (hasGeojsonResult.value ? legendClassItems : 
 const preprocessNotes = computed(() => [
   { label: '分析年份', value: `${preprocessForm.year} 年` },
   { label: '目标区域', value: activeRegionLabel.value },
+  { label: '区域来源', value: uploadedRegionMeta.value?.source_type ? (uploadedRegionMeta.value.source_type === 'geojson' ? 'GeoJSON' : 'Shapefile') : '预设区域' },
   { label: '空间分辨率', value: `${preprocessResultMeta.value?.resolution || preprocessForm.res}` },
   { label: '坐标系统', value: preprocessResultMeta.value?.coordinate_system || preprocessForm.src },
   { label: '重采样', value: preprocessResultMeta.value?.reclass_method || preprocessForm.resuml }
 ])
+const regionUploadRows = computed(() => {
+  if (!uploadedRegionMeta.value) return []
+  return [
+    { label: '区域编码', value: uploadedRegionMeta.value.region_code || '--' },
+    { label: '区域名称', value: uploadedRegionMeta.value.region_name || '--' },
+    { label: '文件类型', value: uploadedRegionMeta.value.source_type === 'geojson' ? 'GeoJSON' : 'Shapefile' },
+    { label: '边界要素', value: uploadedRegionMeta.value.geojson?.features?.length || 0 }
+  ]
+})
 const preprocessSummaryRows = computed(() => {
   if (!preprocessResp.value) return []
   return [
     { label: '年份', value: `${preprocessForm.year} 年` },
     { label: '区域', value: activeRegionLabel.value },
+    { label: '区域编码', value: preprocessForm.region },
     { label: '分辨率', value: preprocessResultMeta.value?.resolution || preprocessForm.res },
     { label: '坐标系', value: preprocessResultMeta.value?.coordinate_system || preprocessForm.src },
     { label: '重采样', value: preprocessResultMeta.value?.reclass_method || preprocessForm.resuml },
@@ -591,6 +667,13 @@ function resetResultState() {
   regressionResolvedModel.value = ''
 }
 
+function resetPreprocessState() {
+  stepStatus[0] = false
+  preprocessResp.value = ''
+  preprocessedPayload.value = null
+  preprocessResultMeta.value = null
+}
+
 function exportMapGeojson() {
   const payload = exportRegionGeojson.value || geojsonData.value
   if (!payload) return
@@ -604,6 +687,10 @@ function exportAnalysisJson() {
       meta: preprocessResultMeta.value,
       data: preprocessedPayload.value
     },
+    uploadedRegion: {
+      meta: uploadedRegionMeta.value,
+      previewGeojson: uploadedRegionGeojson.value
+    },
     regression: regressionPayload.value,
     visualization: exportRegionGeojson.value,
     mechanism: mechanismAnalysis.value,
@@ -614,12 +701,86 @@ function exportAnalysisJson() {
 }
 
 function onPreprocessFileChange(e) {
-  preprocessForm.file = e.target.files[0]
+  const files = getSelectedFileList(e.target.files)
+  selectedRegionFiles.value = files
+  preprocessForm.file = files[0] || null
+  regionUploadResp.value = ''
+  uploadedRegionMeta.value = null
+  uploadedRegionGeojson.value = null
+}
+
+async function onUploadRegion(options = {}) {
+  try {
+    if (!selectedRegionFiles.value.length) {
+      throw new Error('请先选择区域文件')
+    }
+
+    const fileMap = Object.fromEntries(selectedRegionFiles.value.map((file) => {
+      const ext = file.name.split('.').pop()?.toLowerCase() || ''
+      return [ext, file]
+    }))
+    const regionCode = getUploadedRegionCode()
+    const regionName = getUploadedRegionName()
+    const formData = new FormData()
+    formData.append('region_code', regionCode)
+    formData.append('region_name', regionName)
+
+    if (fileMap.geojson || fileMap.json) {
+      formData.append('geojson_file', fileMap.geojson || fileMap.json)
+    } else {
+      if (!fileMap.shp || !fileMap.shx || !fileMap.dbf) {
+        throw new Error('Shapefile 上传至少需要同时选择 .shp、.shx、.dbf 文件')
+      }
+      formData.append('shp_file', fileMap.shp)
+      formData.append('shx_file', fileMap.shx)
+      formData.append('dbf_file', fileMap.dbf)
+      if (fileMap.prj) formData.append('prj_file', fileMap.prj)
+    }
+
+    const data = await api.post('/api/upload/region', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+
+    uploadedRegionMeta.value = data
+    uploadedRegionGeojson.value = data.geojson || null
+    regionUploadResp.value = JSON.stringify(data, null, 2)
+    selectedFeature.value = null
+    resetPreprocessState()
+    resetResultState()
+
+    const option = {
+      label: data.region_name || regionName,
+      value: data.region_code || regionCode
+    }
+    const existingIndex = customRegionOptions.value.findIndex((item) => item.value === option.value)
+    if (existingIndex === -1) customRegionOptions.value = [...customRegionOptions.value, option]
+    else customRegionOptions.value[existingIndex] = option
+
+    preprocessForm.region = option.value
+    regressionForm.region = option.value
+    downloadForm.region = option.value
+    visualizeForm.region = option.value
+
+    if (!options.silent) {
+      currentStep.value = 0
+      currentTab.value = tabs[0].value
+    }
+
+    return data
+  } catch (e) {
+    const message = e?.response?.data?.message || e?.message || String(e)
+    regionUploadResp.value = message
+    throw e
+  }
 }
 
 async function onPreprocess() {
   try {
-    resetResultState()
+    if (selectedRegionFiles.value.length) {
+      await onUploadRegion({ silent: true })
+    } else {
+      resetResultState()
+    }
     const payload = {
       year: preprocessForm.year,
       region: preprocessForm.region,
@@ -647,7 +808,7 @@ async function onPreprocess() {
     currentStep.value = 1
     currentTab.value = tabs[1].value
   } catch (e) {
-    preprocessResp.value = e?.message || String(e)
+    preprocessResp.value = e?.response?.data?.message || e?.message || String(e)
   }
 }
 async function onRegression() {
@@ -1106,6 +1267,32 @@ body {
   border-color: #4f46e5;
   background: #f0f4ff;
   color: #4f46e5;
+}
+.file-upload-tip {
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.selected-file-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.file-chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.8rem;
+  border: 1px solid #bfdbfe;
+}
+.upload-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
 }
 .checkbox-group {
   display: grid;
