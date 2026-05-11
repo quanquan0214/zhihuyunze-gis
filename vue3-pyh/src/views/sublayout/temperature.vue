@@ -1,5 +1,23 @@
 <template>
   <div class="content">
+    <div class="gis-summary-row">
+      <div class="gis-summary-card">
+        <span class="label">当前模式</span>
+        <strong>{{ activeModeLabel }}</strong>
+      </div>
+      <div class="gis-summary-card">
+        <span class="label">空间类型</span>
+        <strong>{{ spatialTypeLabel }}</strong>
+      </div>
+      <div class="gis-summary-card">
+        <span class="label">当前年份</span>
+        <strong>{{ selectedYear }}年</strong>
+      </div>
+      <div class="gis-summary-card">
+        <span class="label">结果状态</span>
+        <strong>{{ resultStatusLabel }}</strong>
+      </div>
+    </div>
     <!-- 主要内容区 -->
     <main class="main">
       <div class="map-area">
@@ -80,21 +98,62 @@
           >月度分析</el-button>
         </div>
 
-        <div class="legend-panel">
-          <div class="legend-title">
-            {{ category === 'wendu' ? '温度图例' : '降水图例' }}
+        <div class="toolbar toolbar-export">
+          <el-button-group>
+            <el-button size="small" type="success" :disabled="!hasSpatialGeojson" @click="exportSpatialGeojson">导出空间</el-button>
+            <el-button size="small" type="warning" :disabled="!hasAnalysisResult" @click="exportAnalysisResult">导出结果</el-button>
+          </el-button-group>
+        </div>
+
+        <div class="analysis-status-panel">
+          <div class="status-header">
+            <span>GIS分析状态</span>
+            <el-tag size="small" :type="activeFeature ? 'success' : 'info'">{{ activeModeLabel }}</el-tag>
           </div>
-          <img
-            :src="legendUrl"
-            :alt="category === 'wendu' ? '温度图例' : '降水图例'"
-            class="legend-image"
-            @error="onLegendError"
-          />
+          <div class="status-row">
+            <span>空间类型</span>
+            <strong>{{ spatialTypeLabel }}</strong>
+          </div>
+          <div class="status-row">
+            <span>选中对象</span>
+            <strong>{{ selectionLabel }}</strong>
+          </div>
+          <div class="status-row">
+            <span>当前统计</span>
+            <strong>{{ statsLabel }}</strong>
+          </div>
+          <div class="status-row">
+            <span>结果摘要</span>
+            <strong>{{ resultSummaryLabel }}</strong>
+          </div>
+        </div>
+
+        <div class="legend-panel">
+          <div class="legend-title">{{ legendTitle }}</div>
+          <img :src="legendUrl" :alt="legendTitle" class="legend-image" @error="onLegendError" />
+        </div>
+
+        <div v-if="selectionLabel !== '--'" class="map-selection-chip">
+          {{ selectionLabel }}
         </div>
 
         <div class="map" ref="mapDivRef">
-          <BaseMap :layersConfig="mapLayerConfig" :center="[118.75, 28.25]" :zoom="7" ref="basemapRef"
-            @view-ready="onViewReady" @map-click="onMapClick" />
+          <BaseMap
+            :layersConfig="mapLayerConfig"
+            :center="[118.75, 28.25]"
+            :zoom="7"
+            :geojson="geojsonData"
+            :legend-title="legendTitle"
+            ref="basemapRef"
+            @view-ready="onViewReady"
+            @map-click="onMapClick"
+          >
+            <template #legend>
+              <div class="legend-slot">
+                <img :src="legendUrl" :alt="legendTitle" class="legend-image" @error="onLegendError" />
+              </div>
+            </template>
+          </BaseMap>
         </div>
       </div>
     </main>
@@ -172,6 +231,10 @@ const averageValue = ref('-');
 const dialogVisible = ref(false);
 const globalAlertRef = ref(null);
 const showChart = ref(false);
+const geojsonData = ref<any>(null);
+const selectedPoint = ref<[number, number] | null>(null);
+const analysisPayload = ref<any>(null);
+const selectedGeometryName = ref('');
 
 
 // 添加年份和月份的选择
@@ -244,6 +307,7 @@ watch(selectedYear, () => {
 
 // 监听类别变化
 watch(category, async () => {
+  clearAll();
   await fetchAverageValue();
   if (yearlyChart) {
     await updateYearlyChartData();
@@ -274,7 +338,7 @@ async function fetchAverageValue() {
       api.get('/api/RT/avg', {
         params: {
           year: currentYear,
-          data_type: currentCategory === 'wendu' ? 'temperature' : 'rainfall'
+          data_type: currentDataType.value
         }
       }),
       new Promise((_, reject) => 
@@ -282,12 +346,12 @@ async function fetchAverageValue() {
       )
     ]);
     console.log('API response for average value:', response);
-    if (Array.isArray(response)) {
+    if (Array.isArray(response.data)) {
       // 缓存数据
-      dataCache.value[currentCategory][currentYear] = response;
+      dataCache.value[currentCategory][currentYear] = response.data;
       const monthIndex = selectedMonth.value - 1;
-      if (monthIndex >= 0 && monthIndex < response.length) {
-        averageValue.value = response[monthIndex].toFixed(2);
+      if (monthIndex >= 0 && monthIndex < response.data.length) {
+        averageValue.value = Number(response.data[monthIndex]).toFixed(2);
       }
     }
   } catch (error) {
@@ -316,7 +380,7 @@ async function preloadData() {
           api.get('/api/RT/avg', {
             params: {
               year: year,
-              data_type: currentCategory === 'wendu' ? 'temperature' : 'rainfall'
+              data_type: currentDataType.value
             }
           }),
           new Promise((_, reject) => 
@@ -324,8 +388,8 @@ async function preloadData() {
           )
         ]);
         
-        if (Array.isArray(response)) {
-          dataCache.value[currentCategory][year] = response;
+        if (Array.isArray(response.data)) {
+          dataCache.value[currentCategory][year] = response.data;
         }
       } catch (error) {
         console.error(`预加载${year}年数据失败:`, error);
@@ -409,6 +473,47 @@ function onLegendError() {
   if (legendVariantIndex.value < legendCandidates.value.length - 1) {
     legendVariantIndex.value += 1;
   }
+}
+
+function downloadTextFile(filename: string, content: string, mimeType = 'application/json;charset=utf-8') {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function extractMonthlySeries(payload: any): number[] {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload.map((item) => Number(item)).filter((item) => !Number.isNaN(item));
+  if (Array.isArray(payload.monthly_stats)) return payload.monthly_stats.map((item: any) => Number(item)).filter((item: number) => !Number.isNaN(item));
+  if (Array.isArray(payload.monthly_values)) return payload.monthly_values.map((item: any) => Number(item)).filter((item: number) => !Number.isNaN(item));
+  if (Array.isArray(payload.data)) return payload.data.map((item: any) => Number(item)).filter((item: number) => !Number.isNaN(item));
+  return [];
+}
+
+function setSpatialGeojson(feature: any, properties: Record<string, any> = {}) {
+  if (!feature) {
+    geojsonData.value = null;
+    return;
+  }
+
+  geojsonData.value = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        ...feature,
+        properties: {
+          ...(feature.properties ?? {}),
+          ...properties
+        }
+      }
+    ]
+  };
 }
 
 watch([category, selectedYear, selectedMonth], () => {
@@ -520,9 +625,63 @@ const isPointAnalysisActive = ref(false);
 
 // 新增：当前激活的功能
 const activeFeature = ref('');
+const featureLabelMap: Record<string, string> = {
+  draw: '区域分析',
+  city: '城市分析',
+  point: '单点分析',
+  monthly: '月度分析'
+};
+const statsLabelMap: Record<string, string> = {
+  mean: '平均值',
+  median: '中位数',
+  max: '最大值',
+  min: '最小值'
+};
+
+const currentDataType = computed(() => category.value === 'wendu' ? 'temperature' : 'rainfall');
+const currentDataLabel = computed(() => category.value === 'wendu' ? '温度' : '降水');
+const legendTitle = computed(() => `${currentDataLabel.value}图例 · ${selectedYear.value}年${selectedMonth.value.toString().padStart(2, '0')}月`);
+const activeModeLabel = computed(() => activeFeature.value ? featureLabelMap[activeFeature.value] ?? activeFeature.value : '待选择模式');
+const spatialTypeLabel = computed(() => {
+  if (activeFeature.value === 'point') return selectedPoint.value ? '点位' : '待选点位';
+  if (activeFeature.value === 'city') return selectedCityCode.value ? '城市' : '待选城市';
+  if (activeFeature.value === 'draw') return polygon.value ? '区域' : '待绘区域';
+  if (selectedPoint.value) return '点位';
+  if (selectedCityCode.value) return '城市';
+  if (polygon.value) return '区域';
+  return '未激活';
+});
+const selectionLabel = computed(() => {
+  if (activeFeature.value === 'point' && selectedPoint.value) {
+    return `${selectedPoint.value[0].toFixed(4)}, ${selectedPoint.value[1].toFixed(4)}`;
+  }
+  if (activeFeature.value === 'city' && selectedGeometryName.value) return selectedGeometryName.value;
+  if (activeFeature.value === 'draw' && selectedGeometryName.value) return selectedGeometryName.value;
+  if (selectedGeometryName.value) return selectedGeometryName.value;
+  if (selectedCityCode.value) return selectedCityCode.value;
+  return '--';
+});
+const statsLabel = computed(() => statsLabelMap[selectedStat.value] ?? selectedStat.value);
+const resultStatusLabel = computed(() => analysisPayload.value ? '已生成' : activeFeature.value ? '分析中' : '待生成');
+const resultSummaryLabel = computed(() => {
+  const payload = analysisPayload.value;
+  if (!payload) return '待生成';
+  const value = payload.yearly_stat ?? payload.yearly_value;
+  if (typeof value === 'number') {
+    return `${value.toFixed(2)} ${category.value === 'wendu' ? '°C' : 'mm'}`;
+  }
+  const series = extractMonthlySeries(payload);
+  if (series.length) {
+    return `${series.length}个月序列`;
+  }
+  return '已生成';
+});
+const hasSpatialGeojson = computed(() => !!geojsonData.value?.features?.length);
+const hasAnalysisResult = computed(() => !!analysisPayload.value);
 
 // 添加单点分析函数
 async function startPointAnalysis() {
+  activeFeature.value = 'point';
   isPointAnalysisActive.value = true;
   setMapCursor('crosshair');
   ElMessage.info('请点击地图上的位置进行单点分析');
@@ -536,7 +695,6 @@ async function onMapClick(event) {
   if (isPointAnalysisActive.value) {
     isPointAnalysisActive.value = false;
     setMapCursor('default');
-    activeFeature.value = '';
 
     if (!event.latitude || !event.longitude) {
       ElMessage.warning('请点击地图区域');
@@ -548,7 +706,7 @@ async function onMapClick(event) {
         lon: event.longitude,
         lat: event.latitude,
         year: selectedYear.value,
-        data_type: category.value === 'wendu' ? 'temperature' : 'rainfall'
+        data_type: currentDataType.value
       });
 
       const response = await api.get('/api/RT/coodinate', {
@@ -556,19 +714,33 @@ async function onMapClick(event) {
           lon: event.longitude,
           lat: event.latitude,
           year: selectedYear.value,
-          data_type: category.value === 'wendu' ? 'temperature' : 'rainfall'
+          data_type: currentDataType.value
         }
       });
 
       console.log('API response:', response); // 添加调试日志
+      const pointData = response.data ?? response;
 
       // 更新数据
+      selectedPoint.value = [event.longitude, event.latitude];
+      selectedGeometryName.value = `坐标点(${event.longitude.toFixed(4)}, ${event.latitude.toFixed(4)})`;
+      analysisPayload.value = pointData;
+      setSpatialGeojson({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [event.longitude, event.latitude]
+        }
+      }, {
+        name: selectedGeometryName.value,
+        spatial_type: 'point'
+      });
       selectedCityGeoJson.value = {
         features: [{
           properties: {
             city_code: 'point',
-            city_name: `坐标点(${event.longitude.toFixed(4)}, ${event.latitude.toFixed(4)})`,
-            data: response.data
+            city_name: selectedGeometryName.value,
+            data: pointData
           }
         }]
       };
@@ -637,6 +809,9 @@ watch(cityGeoJsonDialogVisible, (newVal) => {
     isRegionData.value = false;
     isPointAnalysisActive.value = false;
     activeFeature.value = '';
+    selectedPoint.value = null;
+    analysisPayload.value = null;
+    geojsonData.value = null;
     setMapCursor('default');
   }
 });
@@ -662,7 +837,6 @@ async function startDrawing() {
     polygonCoordinates.value = coordinates;
     drawingMode.value = null;
     isRegionData.value = true;
-    activeFeature.value = '';
     await fetchRegionData();
   });
 }
@@ -676,18 +850,38 @@ function clearAll() {
   drawingMode.value = null;
   activeFeature.value = '';
   isRegionData.value = false;
+  selectedPoint.value = null;
+  selectedGeometryName.value = '';
+  geojsonData.value = null;
+  analysisPayload.value = null;
+  selectedCityGeoJson.value = null;
+  selectedCityCode.value = null;
+  cityLayer.setVisible(false);
+  isPointAnalysisActive.value = false;
+  cityGeoJsonDialogVisible.value = false;
+  monthlyAnalysisDialogVisible.value = false;
+  setMapCursor('default');
 }
 
 // 获取区域数据
 async function fetchRegionData() {
-  if (!polygonCoordinates.value.length) return;
+  if (!polygon.value) return;
 
   try {
-    const response = await api.post('/api/RT/points', {
-      points: polygonCoordinates.value,
+    activeFeature.value = 'draw';
+    const regionGeojson = convertFeatureToGeoJSON(polygon.value);
+    const response = await api.post('/api/RT/geojson', {
+      geojson: regionGeojson,
       year: selectedYear.value,
-      data_type: category.value === 'wendu' ? 'temperature' : 'rainfall',
+      data_type: currentDataType.value,
       stats: selectedStat.value
+    });
+    const regionData = response.data ?? response;
+    analysisPayload.value = regionData;
+    selectedGeometryName.value = '选中区域';
+    setSpatialGeojson(regionGeojson, {
+      name: selectedGeometryName.value,
+      spatial_type: 'region'
     });
 
     // 更新数据
@@ -695,8 +889,8 @@ async function fetchRegionData() {
       features: [{
         properties: {
           city_code: 'region',
-          city_name: '选中区域',
-          data: response.data
+          city_name: selectedGeometryName.value,
+          data: regionData
         }
       }]
     };
@@ -797,6 +991,7 @@ async function showCityData() {
       return;
     }
 
+    activeFeature.value = 'city';
     isRegionData.value = false;
 
     console.log('Fetching data for city:', selectedCityCode.value);
@@ -805,18 +1000,27 @@ async function showCityData() {
       params: {
         code: selectedCityCode.value,
         year: selectedYear.value,
-        data_type: category.value === 'wendu' ? 'temperature' : 'rainfall',
+        data_type: currentDataType.value,
         stats: selectedStat.value
       }
     });
+    const cityData = response.data ?? response;
 
     const cityFeature = citySource.getFeatures().find(feature => feature.get('city_code') === selectedCityCode.value);
+    selectedGeometryName.value = cityFeature?.get('city_name') ?? '未知城市';
+    analysisPayload.value = cityData;
+    if (cityFeature) {
+      setSpatialGeojson(convertFeatureToGeoJSON(cityFeature), {
+        name: selectedGeometryName.value,
+        spatial_type: 'city'
+      });
+    }
     selectedCityGeoJson.value = {
       features: [{
         properties: {
           city_code: selectedCityCode.value,
-          city_name: cityFeature?.get('city_name') ?? '未知城市',
-          data: response.data
+          city_name: selectedGeometryName.value,
+          data: cityData
         }
       }]
     };
@@ -849,6 +1053,9 @@ watch(cityGeoJsonDialogVisible, (newVal) => {
     selectedCityCode.value = null;
     isRegionData.value = false;
     activeFeature.value = '';
+    selectedGeometryName.value = '';
+    analysisPayload.value = null;
+    geojsonData.value = null;
   }
 });
 
@@ -858,18 +1065,57 @@ async function showCityGeoJson() {
     if (citySource.getFeatures().length === 0) {
       await loadCityRegions();
     }
+    selectedGeometryName.value = '待选择城市';
   } catch (error) {
     console.error('获取城市GeoJSON数据失败:', error);
     ElMessage.error('获取城市数据失败，请重试');
   }
 }
 
+function exportSpatialGeojson() {
+  if (!hasSpatialGeojson.value) {
+    ElMessage.warning('当前没有可导出的空间结果');
+    return;
+  }
+
+  downloadTextFile(
+    `${currentDataType.value}_spatial_${selectedYear.value}_${selectedMonth.value.toString().padStart(2, '0')}.geojson`,
+    JSON.stringify(geojsonData.value, null, 2),
+    'application/geo+json;charset=utf-8'
+  );
+  ElMessage.success('空间结果已导出');
+}
+
+function exportAnalysisResult() {
+  if (!hasAnalysisResult.value) {
+    ElMessage.warning('当前没有可导出的分析结果');
+    return;
+  }
+
+  downloadTextFile(
+    `${currentDataType.value}_analysis_${selectedYear.value}_${selectedMonth.value.toString().padStart(2, '0')}.json`,
+    JSON.stringify({
+      data_type: currentDataType.value,
+      year: selectedYear.value,
+      month: selectedMonth.value,
+      mode: activeFeature.value,
+      stats: selectedStat.value,
+      selection: selectionLabel.value,
+      analysis: analysisPayload.value
+    }, null, 2)
+  );
+  ElMessage.success('分析结果已导出');
+}
+
 // 添加更新图表数据的函数
 function updateChartData() {
   if (chart && selectedCityGeoJson.value && selectedCityGeoJson.value.features.length > 0) {
-    const cityData = selectedCityGeoJson.value.features[0].properties.data;
-    if (cityData) {
+    const cityData = extractMonthlySeries(selectedCityGeoJson.value.features[0].properties.data);
+    if (cityData.length) {
       chart.setOption({
+        title: {
+          text: `${selectedCityGeoJson.value.features[0].properties.city_name}${currentDataLabel.value}数据`
+        },
         series: [{
           data: cityData
         }]
@@ -1177,7 +1423,7 @@ async function updateYearlyChartData() {
       api.get('/api/RT/avg', {
         params: {
           year: selectedYear.value,
-          data_type: category.value === 'wendu' ? 'temperature' : 'rainfall'
+          data_type: currentDataType.value
         }
       }),
       new Promise((_, reject) => 
@@ -1280,6 +1526,9 @@ onUnmounted(() => {
 
 // 修改：激活功能方法
 function activateFeature(feature) {
+  if (activeFeature.value !== feature) {
+    clearAll();
+  }
   activeFeature.value = feature;
   if (feature === 'draw') startDrawing();
   if (feature === 'point') startPointAnalysis();
@@ -1303,6 +1552,33 @@ function deactivateFeature() {
   flex-direction: column;
   background: #f5f6fa;
   padding: 0 0 30px 0;
+}
+
+.gis-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding: 14px 16px 10px;
+}
+
+.gis-summary-card {
+  background: linear-gradient(135deg, rgba(64, 158, 255, 0.12), rgba(64, 158, 255, 0.04));
+  border: 1px solid rgba(64, 158, 255, 0.18);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gis-summary-card .label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.gis-summary-card strong {
+  color: #0f172a;
+  font-size: 15px;
 }
 
 .main {
@@ -1446,6 +1722,49 @@ function deactivateFeature() {
       align-items: center;
     }
 
+    .toolbar-export {
+      left: auto;
+      right: 20px;
+    }
+
+    .analysis-status-panel {
+      position: absolute;
+      left: 70px;
+      top: 72px;
+      z-index: 100;
+      width: 240px;
+      background: rgba(255, 255, 255, 0.94);
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      padding: 12px 14px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+      backdrop-filter: blur(8px);
+    }
+
+    .status-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      color: #475569;
+      margin-top: 6px;
+    }
+
+    .status-row strong {
+      color: #0f172a;
+      font-weight: 600;
+    }
+
     .legend-panel {
       position: absolute;
       left: 40px;
@@ -1469,6 +1788,13 @@ function deactivateFeature() {
         display: block;
       }
     }
+
+    .legend-slot {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 120px;
+    }
   }
 }
 
@@ -1477,6 +1803,20 @@ function deactivateFeature() {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.map-selection-chip {
+  position: absolute;
+  right: 20px;
+  bottom: 18px;
+  z-index: 120;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(64, 158, 255, 0.18);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #1e293b;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
 }
 
 :deep(.city-data-dialog) {
