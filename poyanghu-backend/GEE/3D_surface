@@ -1,0 +1,48 @@
+# 对点云做表面重建并保存为vtk文件
+# 该文件使用的方法只适合小型文件，对于大型文件，该三维建模重建会很耗时，大型文件应该用Delunay三角剖分算法
+# 但Delunay三角剖分算法的结果不一定符合要求，所以还是需要用其他算法来进行表面重建
+
+
+
+import vtk
+import numpy as np
+
+# 打开文件并读取所有行
+with open("D:/class_work/3D-GIS_Data/cactus.3337.pts", "r") as f:
+    lines = f.readlines()
+
+f.close()
+pts = vtk.vtkPoints()
+pts.SetDataTypeToDouble()
+for i in lines:
+    ln = i.strip().split(" ")
+    if ln[0] != "p": continue
+    pts.InsertNextPoint([float(ln[1]), float(ln[2]), float(ln[3])])
+ca = vtk.vtkCellArray()
+print(pts.GetNumberOfPoints())
+
+for i in range(pts.GetNumberOfPoints()):
+    v = vtk.vtkVertex()
+    v.GetPointIds().SetId(0, i)
+    ca.InsertNextCell(v)
+# 构建vtkPolyData
+polydata = vtk.vtkPolyData()
+polydata.SetPoints(pts)
+polydata.SetVerts(ca)
+
+# 表面重建
+# 该方法只适合小型文件，对于大型文件，该三维建模重建会很耗时，大型文件应该用Delunay三角剖分算法
+# 但Delunay三角剖分算法的结果不一定符合要求，所以还是需要用其他算法来进行表面重建
+sr = vtk.vtkSurfaceReconstructionFilter()  # 表面重建滤波器，得到的是三维栅格
+sr.SetInputData(polydata)
+sr.Update()
+cf = vtk.vtkContourFilter()  # 等值面滤波器，得到的是二维轮廓
+cf.SetInputConnection(sr.GetOutputPort())
+cf.SetValue(0, 0.0)
+cf.Update()
+
+# 保存vtk文件
+writer = vtk.vtkPolyDataWriter()
+writer.SetFileName("D:/class_work/3D-GIS_Data/cactus.surface.vtk")
+writer.SetInputData(cf.GetOutput())
+writer.Write()

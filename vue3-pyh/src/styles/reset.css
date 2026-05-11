@@ -1,0 +1,49 @@
+body, html, h1, h2, h3, h4, h5, h6, ul, ol, li, dl, dt, dd, header, menu, section, p, input, td, th, ins {
+    padding: 0;
+    margin: 0;
+  }
+.leftfix {
+    float: left;
+}
+
+.rightfix {
+    float: right;
+}
+
+.clearfix::after {
+    content: "";
+    display: block;
+    clear: both;
+}
+
+  a:link,
+  a:visited {
+      color: white;
+      text-decoration: none;
+  }
+  
+  a:hover {
+      color: rgb(101, 171, 228);
+      text-shadow: 0 0 20px white;
+  }
+  img {
+    vertical-align: top;
+  }
+  
+  ul, li {
+    list-style: none;
+  }
+  
+  button {
+    outline: none;
+    border: none;
+  }
+
+html,body{
+    height:100%;
+    width:100%;
+    overflow: hidden;
+}
+div{
+    box-sizing: border-box;
+}

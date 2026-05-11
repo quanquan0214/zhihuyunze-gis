@@ -1,0 +1,140 @@
+# 没有接入predict功能的app.py，于2025/06/01更换成新的app.py
+# 下面存储的是旧的app.py
+
+import sys
+import os
+import jwt
+from flask import Flask, request, jsonify
+from datetime import datetime, timedelta
+from functools import wraps
+import Connect.SQL_DB as DB
+
+# 获取当前文件的目录
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# 将Connect目录添加到sys.path
+sys.path.append(os.path.join(current_dir, 'Connect'))
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'pylake'
+
+
+@app.route('/hello')
+def hello_world():
+    return 'Hello, World!'
+
+
+@app.route('/')
+def index():
+    return 'Welcome to Web_pylake.'
+
+
+@app.route('/register', methods=['OPTIONS', 'POST'])
+def register():
+    if request.method == 'OPTIONS':
+        response = jsonify({'message': 'Preflight request successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response
+    data = request.json
+    username = data.get('username')
+    email = data.get('email')
+    password = data.get('password')
+    # 审查元素
+    if not all([username, email, password]):
+        return jsonify({'message': 'Missing required fields'}), 400
+    success = DB.register(username, email, password)
+    if success == -1:
+        response = jsonify({'message': 'Username already exists'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response, 201
+    elif success == 1:
+        response = jsonify({'message': 'User registered successfully'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response, 200
+    else:
+        response = jsonify({'message': 'Failed to register user'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response, 400
+
+
+# 生成 Token
+def generate_token(username):
+    payload = {
+        'username': username,
+        'exp': datetime.utcnow() + timedelta(minutes=30)  # Token 有效期 30 分钟
+    }
+    token = jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
+    return token
+
+
+# 验证 Token
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({'message': 'Token is missing!'}), 401
+        try:
+            token = token.replace('Bearer ', '')
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            # 这里可以根据 data 中的 user_id 做更多的验证
+        except jwt.ExpiredSignatureError:
+            return jsonify({'message': 'Token has expired!'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'message': 'Invalid token!'}), 401
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+# 用户登录
+@app.route('/login', methods=['OPTIONS', 'POST'])
+def login_user():
+    if request.method == 'OPTIONS':
+        response = jsonify({'message': 'Preflight request successful'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    if not username or not password:
+        response = jsonify({'message': 'Username and password are required!'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response, 400
+    # 验证用户
+    user_id = DB.login(username, password)
+    if user_id:
+        token = generate_token(user_id)
+        response = jsonify({'message': 'Login successful', 'token': token})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response, 200
+    else:
+        response = jsonify({'message': 'Invalid username or password'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response, 401
+
+
+# 受保护的路由示例
+@app.route('/protected', methods=['GET'])
+@token_required
+def protected():
+    return jsonify({'message': 'This is a protected route!'})
+
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=6419, debug=True)

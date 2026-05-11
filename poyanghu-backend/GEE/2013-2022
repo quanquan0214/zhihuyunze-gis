@@ -1,0 +1,327 @@
+//修改roi
+var roi = ee.FeatureCollection("users/chenliyuan327/poyangRegion");
+Map.centerObject(roi, 8);
+//Map.addLayer(roi,{},'shp');
+//水体掩膜
+function remove_water(img,start,end) {
+    var year = img.get('year')
+    var jrc_year = ee.ImageCollection('JRC/GSW1_4/YearlyHistory')
+            .filterDate(start, end)
+            .first()
+            .clip(roi)
+            .select('waterClass')
+            .reproject('EPSG:4326',null,30)
+    // var Mask = jrc_year
+    //                   // 掩膜掉大片永久水体
+    //                   .eq(3)
+    var Mask = jrc_year
+            // 将永久水体和季节性水体都设为 1
+            .eq(3).or(jrc_year.eq(2))
+    // 此时Mask中value值有1 ， 0 ， masked，把masked转化为 0
+    Mask = Mask.unmask(0).not()
+    return img.updateMask(Mask)
+}
+//去云
+function maskL8sr(image) {
+  // Bit 0 - Fill
+  // Bit 1 - Dilated Cloud
+  // Bit 2 - Cirrus
+  // Bit 3 - Cloud
+  // Bit 4 - Cloud Shadow
+  var qaMask = image.select('QA_PIXEL').bitwiseAnd(parseInt('11111', 2)).eq(0);
+  var saturationMask = image.select('QA_RADSAT').eq(0);
+
+  // Apply the scaling factors to the appropriate bands.
+  var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+  var thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0);
+
+  // Replace the original bands with the scaled ones and apply the masks.
+  return image.addBands(opticalBands, null, true)
+      .addBands(thermalBands, null, true)
+      .updateMask(qaMask)
+      .updateMask(saturationMask);
+}
+//SI
+function SI_cal(img) {
+ var blue = img.select("SR_B2");
+ var red = img.select("SR_B4");
+ var nir = img.select("SR_B5");
+ var swir1 = img.select("SR_B6");
+ var swir2 = img.select("SR_B7");
+ var SI_temp =((swir1.add(red)).subtract(blue.add(nir)))
+              .divide((swir1.add(red)).add(blue.add(nir)))
+ //print(SI_temp);
+ return SI_temp;
+}
+//IBI
+function IBI_cal(img) {
+ var green = img.select("SR_B3");
+ var red = img.select("SR_B4");
+ var nir = img.select("SR_B5");
+ var swir1 = img.select("SR_B6");
+ var IBI_temp =(((swir1.multiply(2.0)).divide(swir1.add(nir)))
+               .subtract((nir.divide(nir.add(red))).add(green.divide(green.add(swir1)))))
+               .divide((((swir1.multiply(2.0)).divide(swir1.add(nir)))
+               .add((nir.divide(nir.add(red))).add(green.divide(green.add(swir1))))))
+ //print(IBI_temp);
+ return IBI_temp;
+}
+//NDVI
+function NDVI_cal(img) {
+ var ndvi_temp = img.normalizedDifference(["SR_B5","SR_B4"]);
+ //print(ndvi_temp);
+ return ndvi_temp;
+}
+//Wet
+function Wet_cal(img) {
+ var blue = img.select("SR_B2");
+ var green = img.select("SR_B3");
+ var red = img.select("SR_B4");
+ var nir = img.select("SR_B5");
+ var swir1 = img.select("SR_B6");
+ var swir2 = img.select("SR_B7");
+ var wet_temp =blue.multiply(0.1511)
+              .add(green.multiply(0.1973))
+              .add(red.multiply(0.3283))
+              .add(nir.multiply(0.3407))
+              .add(swir1.multiply(-0.7117))
+              .add(swir2.multiply(-0.4559))
+ //print(wet_temp);
+ return wet_temp;
+}
+//img_normalize
+function img_normalize(img){
+      var minMax = img.reduceRegion({
+            reducer:ee.Reducer.minMax(),
+            geometry: roi,
+            scale: 500,
+            maxPixels: 10e13,
+        })
+      var year = img.get('year')
+      var normalize  = ee.ImageCollection.fromImages(
+            img.bandNames().map(function(name){
+                  name = ee.String(name);
+                  var band = img.select(name);
+                  return band.unitScale(ee.Number(minMax.get(name.cat('_min'))), ee.Number(minMax.get(name.cat('_max'))));
+
+              })
+        ).toBands().rename(img.bandNames());
+        var normalized = normalize.min(1).max(0);
+        return normalized;
+}
+// 图像波段重命名函数
+var getNewBandNames = function(prefix) {
+    var seq = ee.List.sequence(1, bandNames.length());
+    return seq.map(function(b) {
+      return ee.String(prefix).cat(ee.Number(b).int());
+    });
+  };
+//主成分分析函数
+var getPrincipalComponents = function(centered, scale, roi) {
+    // 图像转为一维数组
+    var arrays = centered.toArray();
+
+    // 计算协方差矩阵
+    var covar = arrays.reduceRegion({
+      reducer: ee.Reducer.centeredCovariance(),
+      geometry: roi,
+      scale: scale,
+      maxPixels: 1e9
+    });
+    // 获取“数组”协方差结果并转换为数组。
+    // 波段与波段之间的协方差
+    var covarArray = ee.Array(covar.get('array'));
+
+    // 执行特征分析，并分割值和向量。
+    var eigens = covarArray.eigen();
+
+    // 特征值的P向量长度
+    var eigenValues = eigens.slice(1, 0, 1);
+
+    //计算主成分特征值和贡献率
+    var eigenValuesList = eigenValues.toList().flatten()
+    var total = eigenValuesList.reduce(ee.Reducer.sum())
+    var percentageVariance = eigenValuesList.map(function(item) {
+      return (ee.Number(item).divide(total)).multiply(100).format('%.2f')
+    })
+    print('特征值',eigenValues )
+    print("贡献率", percentageVariance)
+
+    // PxP矩阵，其特征向量为行。
+    var eigenVectors = eigens.slice(1, 1);
+    print("特征向量", eigenVectors)
+
+    // 将图像转换为二维阵列
+    var arrayImage = arrays.toArray(1);
+
+    //使用特征向量矩阵左乘图像阵列
+    var principalComponents = ee.Image(eigenVectors).matrixMultiply(arrayImage);
+
+    // 将特征值的平方根转换为P波段图像。
+    var sdImage = ee.Image(eigenValues.sqrt())
+      .arrayProject([0]).arrayFlatten([getNewBandNames('sd')]);
+
+    //将PC转换为P波段图像，通过SD标准化。
+    principalComponents=principalComponents
+      // 抛出一个不需要的维度，[[]]->[]。
+      .arrayProject([0])
+      // 使单波段阵列映像成为多波段映像，[]->image。
+      .arrayFlatten([getNewBandNames('pc')])
+      // 通过SDs使PC正常化。
+      .divide(sdImage);
+    return principalComponents
+  }
+
+
+for(var time = 2013;time<2020;time++)
+{
+//import data
+var start = time+'-01-01';
+var end=time+'-12-31';
+var L8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+    .filterDate(start, end)
+    .filterBounds(roi)
+    .filterMetadata('CLOUD_COVER', 'less_than', 10)
+    .map(maskL8sr)
+    .map(function(img) {
+        return remove_water(img, start, end);
+    })
+    .mean()
+
+//Map.addLayer(L8, {bands: ['SR_B4', 'SR_B3', 'SR_B2'], min: 0, max: 0.3}, 'L8_remove_water')
+
+var MODIS = ee.ImageCollection("MODIS/006/MOD11A2")
+    .filterDate(time+'-04-01', time+'-09-30')
+    .map(function(img) {
+        return remove_water(img, start, end);
+    })
+    .mean()
+// 镶嵌数据
+var L8_no_water = L8.clip(roi);
+var MODIS = MODIS.clip(roi);
+// Map.addLayer(L8_no_water, {bands: ['SR_B4', 'SR_B3', 'SR_B2'], min: 0, max: 0.3}, 'L8_no_water_clip')
+// index
+var ndvi = NDVI_cal(L8_no_water);
+var wet = Wet_cal(L8_no_water);
+var lst = MODIS.expression(
+    'a*0.02-273.15',
+    {
+        a:MODIS.select('LST_Day_1km'),
+    });
+var SI = SI_cal(L8_no_water);
+var IBI = IBI_cal(L8_no_water);
+var NDBSI =(SI.add(IBI)).divide(2.0);
+//normalize index & add bands
+var re_ndvi = img_normalize(ndvi);
+L8_no_water = L8_no_water.addBands(re_ndvi.rename('NDVI').toFloat())
+var re_NDBSI = img_normalize(NDBSI);
+L8_no_water = L8_no_water.addBands(re_NDBSI.rename('NDBSI').toFloat())
+var re_Wet = img_normalize(wet);
+L8_no_water = L8_no_water.addBands(re_Wet.rename('Wet').toFloat())
+var re_lst = img_normalize(lst);
+L8_no_water = L8_no_water.addBands(re_lst.rename('LST').toFloat())
+// print(L8_no_water);
+// 导出数据
+ Export.image.toDrive({
+   image: re_ndvi,
+   description: 'NDVI_'+time,
+   scale: 500,
+   region: roi,
+   crs: 'EPSG:4326',
+   maxPixels: 1e13,
+   fileFormat: 'GeoTIFF',
+ });
+
+ Export.image.toDrive({
+   image: re_Wet,
+   description: 'Wet_'+time,
+   scale: 500,
+   region: roi,
+   crs: 'EPSG:4326',
+   maxPixels: 1e13,
+   fileFormat: 'GeoTIFF',
+ });
+
+ Export.image.toDrive({
+   image: re_lst,
+   description: 'LST_'+time,
+   scale: 500,
+   region: roi,
+   crs: 'EPSG:4326',
+   maxPixels: 1e13,
+   fileFormat: 'GeoTIFF',
+ });
+
+ Export.image.toDrive({
+   image: re_NDBSI,
+   description: 'NDBSI_'+time,
+   scale: 500,
+   region: roi,
+   crs: 'EPSG:4326',
+   maxPixels: 1e13,
+   fileFormat: 'GeoTIFF',
+ });
+
+//select bands & bandnames
+var bands = ["NDVI","Wet","LST","NDBSI"]
+var select_Image =L8_no_water.select(bands)
+var scale = 500;
+var bandNames = select_Image.bandNames();
+//print(select_Image)
+//print(bandNames)
+
+
+//mean img-mean
+var meanDict = select_Image.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: roi,
+    scale: scale,
+    maxPixels: 1e9
+});
+var means = ee.Image.constant(meanDict.values(bandNames));
+var centered = select_Image.subtract(means);
+
+// 进行主成分分析，获得分析结果
+var pca_Image = getPrincipalComponents(centered, scale, roi);
+// 打印主成分分析结果（pca_Image）到控制台，查看其信息
+// print(pca_Image);
+// 将主成分分析结果的第一主成分（pc1）添加到地图中，用于可视化
+// Map.addLayer(pca_Image, {"bands":["pc1"]}, 'pc1');
+
+// 计算 pc1 和湿度的相关系数(=0,不相干；=1，正相关；=-1，负相关)
+var pc1 = pca_Image.select('pc1');
+var correlation = ee.Image.cat(pc1, wet).reduceRegion({
+    reducer: ee.Reducer.pearsonsCorrelation(),  // 皮尔逊相关系数
+    geometry: roi,  // 感兴趣区域
+    scale: 500,  // 分辨率
+    maxPixels: 1e13  // 最大像素数
+});
+// 打印相关系数
+print('pc1 和湿度的相关系数:', correlation.get('correlation'));
+
+// 计算 RSEI（遥感生态指数）的初始值，假设 pc1 与湿度（wet）呈负相关（r(wet) < 0）
+// 公式为：RSEI = 1 - pc1
+var rsei_0 = pca_Image.expression(
+    'constant - pc1',  // 表达式：1 - pc1
+    {
+        constant: 1,   // 常量 1
+        pc1: pca_Image.select('pc1')  // 选择第一主成分（pc1）
+    }
+);
+// 如果 pc1 与湿度（wet）呈正相关（r(wet) > 0），则直接使用 pc1 作为 RSEI 的初始值
+// var rsei_0 = pca_Image.select('pc1');
+// 打印 RSEI 初始值（rsei_0）到控制台，查看其信息
+// print(rsei_0);
+// Map.addLayer(rsei_0,{},'rsei_0');
+var rsei=img_normalize(rsei_0);
+// 导出 RSEI 数据到 Google Drive
+Export.image.toDrive({
+    image: rsei,  // 导出的图像（RSEI 结果）
+    description: 'RSEI_'+time,  // 导出文件的描述
+    scale: 500,  // 分辨率（单位：米）
+    region: roi,  // 导出的区域（感兴趣区域）
+    crs: 'EPSG:4326',  // 坐标系（WGS84）
+    maxPixels: 1e13,  // 最大像素数
+    fileFormat: 'GeoTIFF'  // 文件格式
+});
+}

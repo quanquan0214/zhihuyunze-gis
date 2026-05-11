@@ -1,0 +1,15 @@
+# frontend
+vue3-pyh/node_modules/
+vue3-pyh/dist/
+vue3-pyh/npm-cache/
+
+# backend
+poyanghu-backend/__pycache__/
+poyanghu-backend/**/__pycache__/
+poyanghu-backend/.idea/
+poyanghu-backend/**/*.pyc
+poyanghu-backend/gdal-*.whl
+
+# common
+.DS_Store
+Thumbs.db

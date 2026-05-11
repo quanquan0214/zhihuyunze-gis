@@ -1,0 +1,18 @@
+# 将栅格文件导入到SLQ数据库中，并建立金字塔结构
+# 在本次实验中大概率是用不到了
+
+# 加载插件
+CREATE EXTENSION postgis;
+CREATE EXTENSION postgis_raster;
+
+# 建立金字塔结构：
+raster2pgsql -I -C -s 4326 -t 128x128 -l 2,4 "D:\Google\greenness_2013.tif" public.green2013 | psql -h localhost -p 5433 -U postgres -d GEE
+
+# 未建立金字塔：
+raster2pgsql -I -C -s 4326 -t 128x128 "D:\Google\greenness_2013.tif" public.test | psql -h localhost -p 5433 -U postgres -d GEE
+
+# 实际使用的代码：
+raster2pgsql -I -C -s 4326 -t 128x128 "D:\Google\greenness_2024.tif" public.green2024 | psql -h localhost -p 5433 -U postgres -d GEE
+# D:\Google\greenness_2024.tif是栅格文件路径
+# public是架构，green2024是栅格文件名
+# 密码是305228

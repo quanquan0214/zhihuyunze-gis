@@ -1,0 +1,97 @@
+#本文件用于连接数据库，存储并调用Users数据表，用于用户身份验证
+#下面的register和login函数都是用于前端验证
+import sqlite3
+
+def CreateUsers(db_path='D:\\A_Pylake\\SQLite\\pylake.db'):
+    # 连接到 SQLite 数据库
+    conn = sqlite3.connect(db_path)
+    print("连接数据库成功。")
+    cursor = conn.cursor()
+    try:
+        # 创建表
+        create_table_sql = """
+            CREATE TABLE IF NOT EXISTS Users (
+                username varchar(64) not null primary key,
+                email varchar(64) not null,
+                password varchar(64) not null
+            );
+            """
+        cursor.execute(create_table_sql)
+        # 提交更改
+        conn.commit()
+        print("Users表创建完毕。")
+        # 关闭连接
+        conn.close()
+        print("数据库已关闭。")
+    except:
+        print("Users表已经存在，请不要重复创建。")
+        # 关闭连接
+        conn.close()
+        print("数据库已关闭。")
+
+def InsertData( username , email , password ,db_path = 'D:\\A_Pylake\\SQLite\\pylake.db'):
+    # 连接到 SQLite 数据库
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    try:
+        result=QueryData(username, db_path)
+        if result == -1:
+            conn.close()
+            return 'had' #"该用户名已存在。"
+        value = "('" + username + "','" + email + "','" + password + "');"
+        # 插入数据
+        insert_data_sql = """INSERT INTO Users VALUES """ + value
+        cursor.execute(insert_data_sql)
+        # 提交更改
+        conn.commit()
+        print("Save " + username + " success")
+        # 关闭连接
+        conn.close()
+        return 1
+    except:
+        print("Save " + username + " error")
+        # 关闭连接
+        conn.close()
+        return 0
+
+def QueryData(username, db_path = 'D:\\A_Pylake\\SQLite\\pylake.db'):
+    # 连接到 SQLite 数据库
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    try:
+        query_sql = """SELECT password FROM Users WHERE username = '"""+ username +"';"
+        cursor.execute(query_sql)
+        result = cursor.fetchone()
+        # 提交更改
+        conn.commit()
+        print("Success Query")
+        #关闭连接
+        conn.close()
+        return result[0]
+    except :
+        print("Not Found Anything")
+        # 关闭连接
+        conn.close()
+        return -1
+
+def register( username , email , password ):
+    db_path = 'D:\\A_Pylake\\SQLite\\pylake.db'
+    index = InsertData(username , email , password , db_path )
+    print(index)
+    return index
+def login(username,password):
+    db_path = "D:\\A_Pylake\\SQLite\\pylake.db"
+    rightpwd = QueryData(username, db_path)
+    if str(password) == rightpwd :
+        return 1    #"已登录。"
+    elif rightpwd == -1:
+        return 0 #"该用户名不存在。"
+    else:
+        return 0    #"用户名或密码错误。"
+
+#register('张三', 'zhangsan@qq.com', '1234')
+#InsertData('李四', 'lisi@qq.com', '4567')
+#result=QueryData("王五",db_path)
+#print(result)
+#login("张三",1234)
+#register('test', 'test334@qq.com', 'test')

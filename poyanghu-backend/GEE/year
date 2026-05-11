@@ -1,0 +1,93 @@
+// 用于处理降水数据。
+//该脚本用于生成多波段影像，每个月的降水数据作为一个波段，并合并为年度多波段影像。
+
+var roi = ee.FeatureCollection("users/chenliyuan327/poyangRegion");
+
+// 加载 CHIRPS Pentad 数据集（原始分辨率5.5km）
+var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/PENTAD")
+  .select('precipitation')
+  .filterBounds(roi)
+  .filterDate('2000-01-01', '2023-01-01');
+
+// 定义函数：按月计算平均降水
+function getMonthlyPrecip(year, month) {
+  var startDate = ee.Date.fromYMD(year, month, 1);
+  var endDate = startDate.advance(1, 'month');
+
+  var monthlyMean = chirps
+    .filterDate(startDate, endDate)
+    .mean()
+    .set('year', year)
+    .set('month', month)
+    .set('system:time_start', startDate.millis());
+
+  // 强制重采样到1km
+  return monthlyMean.reproject({
+    crs: 'EPSG:4326',
+    scale: 1000
+  });
+}
+
+// 定义函数：生成有效的波段名称（客户端可解析）
+function getBandName(month) {
+  // 将月份数字转换为两位数字符串（客户端操作）
+  var monthStr = month < 10 ? '0' + month : month.toString();
+  return 'precip_' + monthStr;
+}
+
+// 定义函数：将一年12个月的影像合并为多波段影像
+function createYearlyImage(year) {
+  // 客户端月份列表
+  var months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+  // 创建空列表存储处理后的影像
+  var processedImages = [];
+
+  // 使用客户端循环处理每个月
+  for (var i = 0; i < months.length; i++) {
+    var month = months[i];
+    var image = getMonthlyPrecip(year, month);
+
+    // 使用客户端生成的波段名称
+    var bandName = getBandName(month);
+    processedImages.push(image.rename(bandName));
+  }
+
+  // 将影像列表转换为ImageCollection
+  var imgCol = ee.ImageCollection(processedImages);
+
+  // 合并为多波段影像并二次确认重采样
+  return imgCol.toBands()
+    .reproject({
+      crs: 'EPSG:4326',
+      scale: 1000
+    })
+    .set('year', year)
+    .clip(roi);
+}
+
+// 生成年份列表（客户端）
+var years = [];
+for (var y = 2000; y <= 2022; y++) {
+  years.push(y);
+}
+
+// 导出每年的多波段影像
+years.forEach(function(year) {
+  var yearlyImage = createYearlyImage(year);
+
+  // 打印验证波段名称
+  print('Processing year:', year, 'Band names:', yearlyImage.bandNames());
+
+  Export.image.toDrive({
+    image: yearlyImage,
+    description: year + '_precip',
+   // folder: 'GEE_Precipitation',
+    fileNamePrefix: year + '_precip',
+    region: roi,
+    scale: 1000,
+    crs: 'EPSG:4326',
+    maxPixels: 1e13,
+    fileFormat: 'GeoTIFF'
+  });
+});

@@ -1,0 +1,141 @@
+var roi = ee.FeatureCollection("projects/logical-bolt-460306-b1/assets/firstclip");
+
+function maskL8sr(image) {
+  var qaMask = image.select('QA_PIXEL').bitwiseAnd(parseInt('11111', 2)).eq(0);
+  var saturationMask = image.select('QA_RADSAT').eq(0);
+  // Apply the scaling factors to the appropriate bands.
+  var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+  var thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0);
+  // Replace the original bands with the scaled ones and apply the masks.
+  return image.addBands(opticalBands, null, true)
+      .addBands(thermalBands, null, true)
+      .updateMask(qaMask)
+      .updateMask(saturationMask);
+}
+var landsat8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2');
+
+var mouth = ["02","06","09","11"];
+var dateTag = ['up','max','down','min'];
+for(var time = 2013;time<2023;time++)
+{
+  for (var m=0;m<4;m++)
+  {
+    if (m == 3)
+    {
+      var start = time+"-"+mouth[m]+'-21';
+      var t = time+1;
+      var end = t +"-"+mouth[0]+'-21';
+    }
+    else
+    {
+      var start = time+"-"+mouth[m]+'-21';
+      var end = time+"-"+mouth[m+1]+'-21';
+    }
+
+    // 筛选影像并获取影像信息
+    var filteredCollection = landsat8
+      .filterDate(start, end)
+      .filterBounds(roi);
+
+    // 获取影像数量
+    var imageCount = filteredCollection.size();
+
+    // 获取影像ID列表
+    var imageIds = filteredCollection.aggregate_array('system:index');
+
+    // 打印影像信息
+    print('时间范围:', start, '至', end);
+    print('筛选出的影像数量:', imageCount);
+    print('影像ID列表:', imageIds);
+
+    // 继续处理影像
+    var composite = filteredCollection
+      .map(maskL8sr)
+      .median()
+      .clip(roi);
+
+    var compositeStats = composite.reduceRegion({
+      reducer: ee.Reducer.minMax(),
+      geometry: roi,
+      scale: 30,
+      bestEffort: true
+    });
+    print('Composite band ranges:', compositeStats);
+
+    var ndwi = composite.normalizedDifference(['SR_B3', 'SR_B5']).rename('NDWI');
+        var waterMask = ndwi.gt(0);
+
+    // 计算水域面积
+    var waterArea = waterMask.multiply(ee.Image.pixelArea()).reduceRegion({
+      reducer: ee.Reducer.sum(),
+      geometry: roi,
+      scale: 30,
+      bestEffort: true
+    });
+
+    // 将面积从平方米转换为平方公里
+    var waterAreaKm2 = ee.Number(waterArea.get('NDWI')).divide(1e6);
+    print('水域面积 (km²):', waterAreaKm2);
+
+    var waterOnlyComposite = composite.updateMask(waterMask);
+
+    var depthDualBand = waterOnlyComposite.expression(
+      '32.176 * log(GREEN / RED) + 6.325', {
+        'GREEN': waterOnlyComposite.select('SR_B3').add(1).log(),
+        'RED': waterOnlyComposite.select('SR_B4').add(1).log()
+      });
+
+    // 限制深度范围在0-30m之间
+    var depthDualBand_after = depthDualBand.clamp(0, 30);
+
+    var dualBandStats_after = depthDualBand_after.reduceRegion({
+      reducer: ee.Reducer.minMax(),
+      geometry: roi,
+      scale: 30,
+      bestEffort: true
+    });
+    print('Dual-band ratio depth range:', dualBandStats_after);
+
+    // 计算平均深度
+    var meanDepth = depthDualBand_after.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: roi,
+      scale: 30,
+      bestEffort: true
+    });
+    print('平均深度 (m):', meanDepth.get('constant'));
+
+    // 构建输出文件名（包含时间信息）
+     if (m == 3)
+    {
+      var nt = time+1;
+      var des = nt + '_' + dateTag[m];
+    }
+    else
+    {
+      var des = time + '_' + dateTag[m];
+    }
+
+    // 保存waterMask到Drive
+    Export.image.toDrive({
+      image: waterMask,
+      description: 'NDWI_' + des,
+      folder: 'water',
+      scale: 30,
+      region: roi,
+      crs: 'EPSG:4326',
+      maxPixels: 1e13
+    });
+
+    // 保存depthDualBand_after到Drive
+    Export.image.toDrive({
+      image: depthDualBand_after,
+      description: 'Depth_' + des,
+      folder: 'Depth',
+      scale: 30,
+      region: roi,
+      crs: 'EPSG:4326',
+      maxPixels: 1e13
+    });
+  }
+}

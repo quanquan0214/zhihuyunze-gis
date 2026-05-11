@@ -1,0 +1,8 @@
+:root {
+    --primary-dark: #abc8e4;
+    --primary-light: #ffffff;
+    --accent-blue: rgb(31, 137, 229);
+    --text-primary: hsl(0, 0%, 100%);
+    --text-secondary: rgb(9, 9, 9);
+    --panel-bg: rgba(219, 225, 236, 0.579);
+}
