@@ -70,6 +70,7 @@
               :geojson="displayGeojson"
               :legend-title="legendTitle"
               :legend-items="legendItems"
+              :feature-style-config="featureStyleConfig"
               @map-click="onMapClick"
               @view-ready="onViewReady"
             />
@@ -459,14 +460,23 @@ const factorLabelMap = {
   predicted: '预测值',
   residuals: '残差'
 }
+const residualClassColorMap = {
+  1: '#08306b',
+  2: '#2171b5',
+  3: '#6baed6',
+  4: '#f7f7f7',
+  5: '#fdae6b',
+  6: '#fb6a4a',
+  7: '#cb181d'
+}
 const legendClassItems = [
-  { label: '极低残差 (≤ -3)', color: '#08306b' },
-  { label: '较低残差 (-3 ~ -2)', color: '#2171b5' },
-  { label: '偏低残差 (-2 ~ -1)', color: '#6baed6' },
-  { label: '中等残差 (-1 ~ 1)', color: '#f7f7f7' },
-  { label: '偏高残差 (1 ~ 2)', color: '#fdae6b' },
-  { label: '较高残差 (2 ~ 3)', color: '#fb6a4a' },
-  { label: '极高残差 (≥ 3)', color: '#cb181d' }
+  { label: '极低残差 (≤ -3)', color: residualClassColorMap[1] },
+  { label: '较低残差 (-3 ~ -2)', color: residualClassColorMap[2] },
+  { label: '偏低残差 (-2 ~ -1)', color: residualClassColorMap[3] },
+  { label: '中等残差 (-1 ~ 1)', color: residualClassColorMap[4] },
+  { label: '偏高残差 (1 ~ 2)', color: residualClassColorMap[5] },
+  { label: '较高残差 (2 ~ 3)', color: residualClassColorMap[6] },
+  { label: '极高残差 (≥ 3)', color: residualClassColorMap[7] }
 ]
 
 function formatValue(value) {
@@ -541,6 +551,24 @@ const resultStatusLabel = computed(() => {
 })
 const legendTitle = computed(() => (hasGeojsonResult.value ? '标准化残差分级' : '空间分析图例'))
 const legendItems = computed(() => (hasGeojsonResult.value ? legendClassItems : []))
+const featureStyleConfig = computed(() => {
+  if (!displayGeojson.value?.type) return null
+  return hasGeojsonResult.value
+    ? {
+        property: 'resid_class',
+        colors: residualClassColorMap,
+        defaultColor: residualClassColorMap[4],
+        strokeColor: '#0f172a',
+        fillOpacity: 0.72,
+        strokeWidth: 1.4
+      }
+    : {
+        defaultColor: '#2563eb',
+        strokeColor: '#1d4ed8',
+        fillOpacity: 0.18,
+        strokeWidth: 2
+      }
+})
 const preprocessNotes = computed(() => [
   { label: '分析年份', value: `${preprocessForm.year} 年` },
   { label: '目标区域', value: activeRegionLabel.value },

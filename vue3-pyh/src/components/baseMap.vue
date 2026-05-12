@@ -93,6 +93,15 @@ interface LegendItem {
   color: string;
 }
 
+interface FeatureStyleConfig {
+  property?: string;
+  colors?: Record<string, string>;
+  defaultColor?: string;
+  strokeColor?: string;
+  fillOpacity?: number;
+  strokeWidth?: number;
+}
+
 interface LayerState {
   key: string;
   title: string;
@@ -108,6 +117,7 @@ const props = withDefaults(defineProps<{
   geojson?: any;
   legendTitle?: string;
   legendItems?: LegendItem[];
+  featureStyleConfig?: FeatureStyleConfig | null;
   showLayerManager?: boolean;
   showCoordinates?: boolean;
 }>(), {
@@ -116,6 +126,7 @@ const props = withDefaults(defineProps<{
   zoom: 9,
   legendTitle: '专题图例',
   legendItems: () => [],
+  featureStyleConfig: null,
   showLayerManager: true,
   showCoordinates: true
 });
@@ -140,6 +151,59 @@ let resizeObserver: ResizeObserver | null = null;
 const geojsonFormat = new GeoJSON();
 const activeLayerCount = computed(() => layerStates.value.filter((layer) => layer.visible).length);
 const shouldShowLegend = computed(() => !!slots.legend || props.legendItems.length > 0);
+const vectorStyleCache = new Map<string, Style>();
+
+function withAlpha(color: string, opacity: number) {
+  if (!color) return `rgba(0, 117, 255, ${opacity})`;
+
+  if (color.startsWith('rgba(') || color.startsWith('hsla(')) return color;
+  if (color.startsWith('rgb(')) {
+    return color.replace('rgb(', 'rgba(').replace(')', `, ${opacity})`);
+  }
+
+  let normalized = color.replace('#', '');
+  if (normalized.length === 3) {
+    normalized = normalized.split('').map((char) => char + char).join('');
+  }
+  if (normalized.length !== 6) return color;
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+}
+
+function buildFeatureStyle(color: string, config?: FeatureStyleConfig | null) {
+  const strokeColor = config?.strokeColor || color || '#0075ff';
+  const fillColor = withAlpha(color || config?.defaultColor || '#0075ff', config?.fillOpacity ?? 0.35);
+  const strokeWidth = config?.strokeWidth ?? 2;
+  return new Style({
+    fill: new Fill({ color: fillColor }),
+    stroke: new Stroke({ color: strokeColor, width: strokeWidth }),
+    image: new CircleStyle({
+      radius: 5,
+      fill: new Fill({ color: color || config?.defaultColor || '#0075ff' }),
+      stroke: new Stroke({ color: '#ffffff', width: 1 })
+    })
+  });
+}
+
+function getGeojsonFeatureStyle(feature: any) {
+  const config = props.featureStyleConfig;
+  if (!config?.property || !config.colors) {
+    return buildFeatureStyle(config?.defaultColor || '#0075ff', config);
+  }
+
+  const propertyValue = feature.get(config.property);
+  const fillColor = config.colors[String(propertyValue)] || config.defaultColor || '#0075ff';
+  const cacheKey = `${config.property}:${String(propertyValue)}:${fillColor}:${config.strokeColor || ''}:${config.fillOpacity ?? 0.35}:${config.strokeWidth ?? 2}`;
+
+  if (!vectorStyleCache.has(cacheKey)) {
+    vectorStyleCache.set(cacheKey, buildFeatureStyle(fillColor, config));
+  }
+
+  return vectorStyleCache.get(cacheKey) as Style;
+}
 
 function getLayerTitle(config: LayerConfig) {
   if (!config.subLayers || config.subLayers.length === 0) return '';
@@ -273,11 +337,7 @@ onMounted(() => {
 
   geojsonLayer = new VectorLayer({
     source: new VectorSource(),
-    style: new Style({
-      fill: new Fill({ color: 'rgba(255, 255, 255, 0.3)' }),
-      stroke: new Stroke({ color: '#0075ff', width: 2 }),
-      image: new CircleStyle({ radius: 5, fill: new Fill({ color: '#0075ff' }) })
-    }),
+    style: (feature) => getGeojsonFeatureStyle(feature),
     zIndex: 50
   });
 
@@ -341,6 +401,15 @@ watch(
   () => props.geojson,
   () => {
     updateGeojsonLayer();
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.featureStyleConfig,
+  () => {
+    vectorStyleCache.clear();
+    geojsonLayer?.changed();
   },
   { deep: true }
 );
