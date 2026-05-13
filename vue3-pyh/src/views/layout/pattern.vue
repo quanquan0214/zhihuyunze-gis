@@ -1178,7 +1178,8 @@ function switchToStep(idx) {
 }
 
 .map-stage {
-  min-height: 620px;
+  height: clamp(480px, 62vh, 720px);
+  min-height: 480px;
   padding: 12px;
   border-radius: 22px;
   background: linear-gradient(180deg, #edf4fb 0%, #f8fafc 100%);
@@ -1571,6 +1572,7 @@ function switchToStep(idx) {
   }
 
   .map-stage {
+    height: 420px;
     min-height: 420px;
   }
 }
