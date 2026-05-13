@@ -1,69 +1,70 @@
 <template>
-  <div class="container">
-    <div class="gis-summary-row">
-      <div class="gis-summary-card">
-        <span class="label">当前步骤</span>
-        <strong>{{ steps[currentStep]?.label }}</strong>
+  <div class="analysis-page">
+    <section class="hero-card">
+      <div class="hero-main">
+        <span class="hero-badge">GIS Mechanism</span>
+        <h1>空间回归机制分析</h1>
+        <p>
+          以“研究区边界、栅格预处理、空间回归、结果落图、机制解读”五个动作组织页面。
+          地图是主工作区，右侧只保留流程控制和必要参数。
+        </p>
       </div>
-      <div class="gis-summary-card">
-        <span class="label">分析区域</span>
-        <strong>{{ activeRegionLabel }}</strong>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <span>当前步骤</span>
+          <strong>{{ activeTab.label }}</strong>
+        </div>
+        <div class="hero-stat">
+          <span>研究区域</span>
+          <strong>{{ activeRegionLabel }}</strong>
+        </div>
+        <div class="hero-stat">
+          <span>分析模型</span>
+          <strong>{{ resolvedModelLabel }}</strong>
+        </div>
+        <div class="hero-stat">
+          <span>结果状态</span>
+          <strong>{{ resultStatusLabel }}</strong>
+        </div>
       </div>
-      <div class="gis-summary-card">
-        <span class="label">结果模型</span>
-        <strong>{{ resolvedModelLabel }}</strong>
-      </div>
-      <div class="gis-summary-card">
-        <span class="label">结果状态</span>
-        <strong>{{ resultStatusLabel }}</strong>
-      </div>
-    </div>
-   
-    <div class="main-content">
-      <!-- 左侧面板 -->
-      <div class="left-panel">
-        <!-- 步骤指示器 -->
-        <div class="process-indicator">
-          <div
-            v-for="(step, idx) in steps"
-            :key="step.value"
-            :class="['step', {active: currentStep===idx, completed: idx < currentStep, disabled: idx > currentStep}]"
-            @click="idx <= currentStep && switchToStep(idx)"
-          >
-            <div class="step-circle">{{ idx+1 }}</div>
-            <div class="step-label">{{ step.label }}</div>
+    </section>
+
+    <div class="page-grid">
+      <section class="workspace-column">
+        <div class="workspace-card">
+          <div class="section-head">
+            <div>
+              <h2>空间分析视图</h2>
+              <p>左侧只承担地图、要素查询和当前结果的核心解读。</p>
+            </div>
+            <div class="action-row">
+              <button type="button" class="btn btn-secondary btn-sm" @click="exportMapGeojson" :disabled="!hasGeojsonResult">导出 GeoJSON</button>
+              <button type="button" class="btn btn-secondary btn-sm" @click="exportAnalysisJson" :disabled="!hasAnyAnalysis">导出分析 JSON</button>
+            </div>
           </div>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill" :style="{width: ((currentStep)/(steps.length-1)*100)+'%'}"></div>
-        </div>
-        <!-- 地图区域 -->
-        <div class="card map-section">
-          <div class="map-container">
-            <div class="map-toolbar">
-              <button type="button" class="btn btn-secondary btn-sm" @click="exportMapGeojson" :disabled="!hasGeojsonResult">导出GeoJSON</button>
-              <button type="button" class="btn btn-secondary btn-sm" @click="exportAnalysisJson" :disabled="!hasAnyAnalysis">导出分析JSON</button>
+
+          <div class="status-grid">
+            <div class="status-card">
+              <span>区域</span>
+              <strong>{{ activeRegionLabel }}</strong>
             </div>
-            <div class="map-status-panel">
-              <div class="status-head">
-                <span>GIS状态</span>
-                <strong>{{ resolvedModelLabel }}</strong>
-              </div>
-              <div class="status-line">
-                <span>区域</span>
-                <strong>{{ activeRegionLabel }}</strong>
-              </div>
-              <div class="status-line">
-                <span>空间结果</span>
-                <strong>{{ geojsonFeatureCountLabel }}</strong>
-              </div>
-              <div class="status-line">
-                <span>主导因素</span>
-                <strong>{{ mainFactorLabel }}</strong>
-              </div>
+            <div class="status-card">
+              <span>输出要素</span>
+              <strong>{{ geojsonFeatureCountLabel }}</strong>
             </div>
+            <div class="status-card">
+              <span>回归模型</span>
+              <strong>{{ resolvedModelLabel }}</strong>
+            </div>
+            <div class="status-card">
+              <span>主导因素</span>
+              <strong>{{ mainFactorLabel }}</strong>
+            </div>
+          </div>
+
+          <div class="map-stage">
             <BaseMap
-              style="flex: 1 1 auto; min-height: 360px; width: 100%; border-radius: 8px; border: 1px solid #e0e0e0;"
+              style="height: 100%; width: 100%; border-radius: 18px; border: 1px solid #dbe3ef;"
               :layers-config="layersConfig"
               :center="[115.9, 28.7]"
               :zoom="7"
@@ -75,37 +76,87 @@
               @view-ready="onViewReady"
             />
           </div>
-          <div class="feature-info">
-            <h3>地图结果属性</h3>
+        </div>
+
+        <div class="detail-grid">
+          <article class="detail-card">
+            <div class="section-head compact">
+              <div>
+                <h3>地图属性</h3>
+                <p>点击地图结果后查看该要素的关键字段。</p>
+              </div>
+            </div>
             <div v-if="featureInfoEntries.length" class="feature-grid">
               <div v-for="item in featureInfoEntries" :key="item.key" class="feature-item">
                 <span>{{ item.key }}</span>
                 <strong>{{ item.value }}</strong>
               </div>
             </div>
-            <div v-else class="empty-tip">点击地图结果后显示属性摘要</div>
+            <div v-else class="empty-tip">当前没有选中的空间要素。</div>
+          </article>
+
+          <article class="detail-card">
+            <div class="section-head compact">
+              <div>
+                <h3>{{ insightPanelTitle }}</h3>
+                <p>只显示当前阶段最重要的结果摘要，不再堆叠多个回显卡片。</p>
+              </div>
+            </div>
+            <div v-if="insightPanelRows.length" class="summary-grid">
+              <div v-for="item in insightPanelRows" :key="item.label" class="summary-item">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+            <div v-else class="empty-tip">完成当前步骤后，这里会出现对应的摘要结果。</div>
+          </article>
+        </div>
+      </section>
+
+      <aside class="control-column">
+        <div class="workflow-card">
+          <div class="section-head compact">
+            <div>
+              <h2>分析流程</h2>
+              <p>按步骤推进，避免同时操作多个区块。</p>
+            </div>
+          </div>
+          <div class="workflow-list">
+            <button
+              v-for="(step, idx) in steps"
+              :key="step.value"
+              type="button"
+              :class="['workflow-step', { active: currentStep === idx, done: stepStatus[idx], locked: idx > currentStep }]"
+              :disabled="idx > currentStep"
+              @click="switchToStep(idx)"
+            >
+              <span class="workflow-index">{{ String(idx + 1).padStart(2, '0') }}</span>
+              <span class="workflow-copy">
+                <strong>{{ step.label }}</strong>
+                <small>{{ getStepStateText(idx) }}</small>
+              </span>
+            </button>
           </div>
         </div>
-       
-      </div>
-      <!-- 右侧面板 -->
-      <div class="right-panel">
-        <!-- 步骤内容 -->
-        <div v-for="(tab, idx) in tabs" :key="tab.value" class="step-content" :class="{active: currentStep===idx}">
-          <div class="card">
-            <div class="step-header">
-              <h2 class="step-title">{{ tab.label }}</h2>
-              <p class="step-description">{{ stepDescriptions[tab.value] }}</p>
+
+        <div class="control-card">
+          <div class="section-head">
+            <div>
+              <h2>{{ activeTab.label }}</h2>
+              <p>{{ stepDescriptions[activeTab.value] }}</p>
             </div>
-            <!-- 步骤表单内容 -->
-            <template v-if="tab.value === 'preprocess'">
-              <form @submit.prevent="onPreprocess">
-                <div class="param-meaning">
-                  <div class="param-item" v-for="item in preprocessNotes" :key="item.label">
-                    <strong>{{ item.label }}</strong>
-                    <span>{{ item.value }}</span>
-                  </div>
-                </div>
+          </div>
+
+          <template v-if="activeTab.value === 'preprocess'">
+            <div class="summary-strip">
+              <div v-for="item in preprocessNotes" :key="item.label" class="strip-item">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+
+            <form class="control-form" @submit.prevent="onPreprocess">
+              <div class="form-grid">
                 <div class="form-group">
                   <label class="form-label">分析年份</label>
                   <select class="form-select" v-model="preprocessForm.year">
@@ -132,167 +183,115 @@
                     <option value="other">其他坐标系</option>
                   </select>
                 </div>
-                <div class="form-group">
-                  <label class="form-label">重采样方法</label>
-                  <select class="form-select" v-model="preprocessForm.resuml">
-                    <option v-for="m in resampleMethods" :key="m" :value="m">{{ m }}</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">上传区域文件（shp/geojson）</label>
-                  <div class="file-upload">
-                    <input type="file" multiple @change="onPreprocessFileChange" accept=".shp,.shx,.dbf,.prj,.geojson,.json">
-                    <div class="file-upload-button">
-                      <span>📁</span>
-                      选择文件
-                    </div>
-                  </div>
-                  <div class="file-upload-tip">支持单个 GeoJSON，或一次性选择同名的 `.shp + .shx + .dbf (+ .prj)` 文件组。</div>
-                  <div v-if="selectedRegionFileNames.length" class="selected-file-list">
-                    <span v-for="name in selectedRegionFileNames" :key="name" class="file-chip">{{ name }}</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">重采样方法</label>
+                <select class="form-select" v-model="preprocessForm.resuml">
+                  <option v-for="m in resampleMethods" :key="m" :value="m">{{ m }}</option>
+                </select>
+              </div>
+
+              <div class="upload-box">
+                <div class="upload-head">
+                  <div>
+                    <h3>自定义研究区</h3>
+                    <p>支持单个 GeoJSON，或同名的 `.shp + .shx + .dbf (+ .prj)` 文件组。</p>
                   </div>
                 </div>
-                <div class="form-group">
-                  <label class="form-label">自定义区域编码</label>
-                  <input type="text" class="form-input" v-model="customRegionCode" placeholder="留空则根据文件名自动生成，如 CUSTOM_NC_01">
+                <div class="file-upload">
+                  <input type="file" multiple @change="onPreprocessFileChange" accept=".shp,.shx,.dbf,.prj,.geojson,.json">
+                  <div class="file-upload-button">选择区域文件</div>
                 </div>
-                <div class="form-group">
-                  <label class="form-label">自定义区域名称</label>
-                  <input type="text" class="form-input" v-model="customRegionName" placeholder="例如：核心保护区 / 自定义研究区">
+                <div v-if="selectedRegionFileNames.length" class="selected-file-list">
+                  <span v-for="name in selectedRegionFileNames" :key="name" class="file-chip">{{ name }}</span>
                 </div>
-                <div class="upload-action-row">
-                  <button type="button" class="btn btn-secondary" @click="onUploadRegion" :disabled="!selectedRegionFiles.length">
-                    上传并应用区域
-                  </button>
+                <div class="form-grid compact-grid">
+                  <div class="form-group">
+                    <label class="form-label">区域编码</label>
+                    <input type="text" class="form-input" v-model="customRegionCode" placeholder="留空则自动生成">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">区域名称</label>
+                    <input type="text" class="form-input" v-model="customRegionName" placeholder="例如：核心保护区">
+                  </div>
                 </div>
-                <button type="submit" class="btn btn-primary" :disabled="stepStatus[0]">
-                  <span>🔄</span>
+              </div>
+
+              <div class="action-row split">
+                <button type="button" class="btn btn-secondary" @click="onUploadRegion" :disabled="!selectedRegionFiles.length">
+                  上传并应用区域
+                </button>
+                <button type="submit" class="btn btn-primary">
                   开始预处理
                 </button>
-              </form>
-              <div class="summary-box" v-if="regionUploadRows.length">
-                <div class="summary-title">自定义区域回显</div>
-                <div class="summary-grid">
-                  <div v-for="item in regionUploadRows" :key="item.label" class="summary-item">
-                    <span>{{ item.label }}</span>
-                    <strong>{{ item.value }}</strong>
-                  </div>
+              </div>
+            </form>
+          </template>
+
+          <template v-else-if="activeTab.value === 'regression'">
+            <form class="control-form" @submit.prevent="onRegression">
+              <div class="form-group">
+                <label class="form-label">因变量</label>
+                <input type="text" class="form-input" v-model="regressionForm.dependent_var" placeholder="输入因变量名称">
+              </div>
+              <div class="form-group">
+                <label class="form-label">自变量选择</label>
+                <div class="checkbox-group">
+                  <label class="checkbox-item" v-for="v in independentVars" :key="v.value">
+                    <input type="checkbox" :value="v.value" v-model="regressionForm.independent_vars">
+                    <span>{{ v.label }}</span>
+                  </label>
                 </div>
               </div>
-              <div class="summary-box" v-if="preprocessSummaryRows.length">
-                <div class="summary-title">预处理参数回显</div>
-                <div class="summary-grid">
-                  <div v-for="item in preprocessSummaryRows" :key="item.label" class="summary-item">
-                    <span>{{ item.label }}</span>
-                    <strong>{{ item.value }}</strong>
-                  </div>
-                </div>
+              <div class="form-group">
+                <label class="form-label">回归模型</label>
+                <select class="form-select" v-model="regressionForm.model">
+                  <option value="best">自动选择最佳模型</option>
+                  <option value="OLS">普通最小二乘法 (OLS)</option>
+                  <option value="SLM">空间滞后模型 (SLM)</option>
+                  <option value="SEM">空间误差模型 (SEM)</option>
+                </select>
               </div>
-              <div class="response-area"><pre>{{ regionUploadResp }}</pre></div>
-              <div class="response-area"><pre>{{ preprocessResp }}</pre></div>
-            </template>
-            <template v-else-if="tab.value === 'regression'">
-              <form @submit.prevent="onRegression">
-                <div class="form-group">
-                  <label class="form-label">因变量</label>
-                  <input type="text" class="form-input" v-model="regressionForm.dependent_var" placeholder="输入因变量名称">
-                </div>
-                <div class="form-group">
-                  <label class="form-label">自变量选择</label>
-                  <div class="checkbox-group">
-                    <div class="checkbox-item" v-for="v in independentVars" :key="v.value">
-                      <input type="checkbox" :id="'var-'+v.value" :value="v.value" v-model="regressionForm.independent_vars">
-                      <label :for="'var-'+v.value">{{ v.label }}</label>
-                    </div>
-                  </div>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">回归模型</label>
-                  <select class="form-select" v-model="regressionForm.model">
-                    <option value="best">自动选择最佳模型</option>
-                    <option value="OLS">普通最小二乘法 (OLS)</option>
-                    <option value="SLM">空间滞后模型 (SLM)</option>
-                    <option value="SEM">空间误差模型 (SEM)</option>
-                  </select>
-                </div>
+              <div class="action-row end">
                 <button type="submit" class="btn btn-primary" :disabled="!stepStatus[0] || stepStatus[1]">
-                  <span>📊</span>
                   执行回归分析
                 </button>
-              </form>
-              <div class="summary-box" v-if="regressionSummaryRows.length">
-                <div class="summary-title">回归结果摘要</div>
-                <div class="summary-grid">
-                  <div v-for="item in regressionSummaryRows" :key="item.label" class="summary-item">
-                    <span>{{ item.label }}</span>
-                    <strong>{{ item.value }}</strong>
-                  </div>
-                </div>
               </div>
-              <div class="response-area"><pre>{{ regressionResp }}</pre></div>
-            </template>
-            <template v-else-if="tab.value === 'download'">
-              <div class="summary-box" v-if="downloadSummaryRows.length">
-                <div class="summary-title">结果交付清单</div>
-                <div class="summary-grid">
-                  <div v-for="item in downloadSummaryRows" :key="item.label" class="summary-item">
-                    <span>{{ item.label }}</span>
-                    <strong>{{ item.value }}</strong>
-                  </div>
+            </form>
+          </template>
+
+          <template v-else-if="activeTab.value === 'download'">
+            <div class="download-grid">
+              <div class="mini-card">
+                <h3>空间成果</h3>
+                <p>导出当前模型的 Shapefile 结果。</p>
+                <div class="mini-meta">
+                  <span>{{ downloadForm.year }} 年</span>
+                  <span>{{ downloadForm.region }}</span>
+                  <span>{{ downloadForm.model }}</span>
                 </div>
+                <button type="button" class="btn btn-primary" :disabled="!stepStatus[1]" @click="onDownload('shapefile')">
+                  下载 Shapefile
+                </button>
               </div>
-              <div style="display: grid; gap: 20px;">
-                <div style="padding: 20px; border: 2px solid #e5e7eb; border-radius: 12px;">
-                  <h4 style="margin-bottom: 15px; color: #374151;">空间数据文件</h4>
-                  <form @submit.prevent="onDownload('shapefile')">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                      <div>
-                        <label class="form-label">年份</label>
-                        <input type="text" class="form-input" v-model="downloadForm.year">
-                      </div>
-                      <div>
-                        <label class="form-label">区域</label>
-                        <input type="text" class="form-input" v-model="downloadForm.region">
-                      </div>
-                    </div>
-                    <div style="margin-bottom: 15px;">
-                      <label class="form-label">模型类型</label>
-                      <select class="form-select" v-model="downloadForm.model">
-                        <option value="OLS">OLS</option>
-                        <option value="SLM">SLM</option>
-                        <option value="SEM">SEM</option>
-                      </select>
-                    </div>
-                    <button type="submit" class="btn btn-primary" :disabled="!stepStatus[1]">
-                      <span>📦</span>
-                      下载Shapefile
-                    </button>
-                  </form>
+              <div class="mini-card">
+                <h3>属性表格</h3>
+                <p>导出预处理后的 CSV 表格结果。</p>
+                <div class="mini-meta">
+                  <span>{{ downloadForm.year }} 年</span>
+                  <span>{{ downloadForm.region }}</span>
                 </div>
-                <div style="padding: 20px; border: 2px solid #e5e7eb; border-radius: 12px;">
-                  <h4 style="margin-bottom: 15px; color: #374151;">数据表格文件</h4>
-                  <form @submit.prevent="onDownload('csv')">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                      <div>
-                        <label class="form-label">年份</label>
-                        <input type="text" class="form-input" v-model="downloadForm.year">
-                      </div>
-                      <div>
-                        <label class="form-label">区域</label>
-                        <input type="text" class="form-input" v-model="downloadForm.region">
-                      </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary">
-                      <span>📋</span>
-                      下载CSV文件
-                    </button>
-                  </form>
-                </div>
+                <button type="button" class="btn btn-secondary" :disabled="!stepStatus[0]" @click="onDownload('csv')">
+                  下载 CSV
+                </button>
               </div>
-              <div class="response-area"><pre>{{ downloadResp }}{{ csvResp }}</pre></div>
-            </template>
-            <template v-else-if="tab.value === 'visualize'">
-              <form @submit.prevent="onVisualize">
+            </div>
+          </template>
+
+          <template v-else-if="activeTab.value === 'visualize'">
+            <form class="control-form" @submit.prevent="onVisualize">
+              <div class="form-grid">
                 <div class="form-group">
                   <label class="form-label">可视化年份</label>
                   <input type="text" class="form-input" v-model="visualizeForm.year" placeholder="输入年份">
@@ -301,52 +300,32 @@
                   <label class="form-label">区域范围</label>
                   <input type="text" class="form-input" v-model="visualizeForm.region" placeholder="区域代码">
                 </div>
-                <div class="form-group">
-                  <label class="form-label">选择模型结果</label>
-                  <select class="form-select" v-model="visualizeForm.model">
-                    <option value="OLS">OLS模型结果</option>
-                    <option value="SLM">SLM模型结果</option>
-                    <option value="SEM">SEM模型结果</option>
-                  </select>
-                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">模型结果</label>
+                <select class="form-select" v-model="visualizeForm.model">
+                  <option value="OLS">OLS模型结果</option>
+                  <option value="SLM">SLM模型结果</option>
+                  <option value="SEM">SEM模型结果</option>
+                </select>
+              </div>
+              <div class="action-row split">
                 <button type="submit" class="btn btn-primary" :disabled="!stepStatus[1]">
-                  <span>🎨</span>
                   生成可视化地图
                 </button>
-                <button type="button" class="btn btn-secondary" style="margin-left: 12px;" @click="runMechanismAnalysis" :disabled="!stepStatus[1]">
+                <button type="button" class="btn btn-secondary" @click="runMechanismAnalysis" :disabled="!stepStatus[1]">
                   生成机制解读
                 </button>
-              </form>
-              <div class="summary-box" v-if="visualSummaryRows.length">
-                <div class="summary-title">地图回显摘要</div>
-                <div class="summary-grid">
-                  <div v-for="item in visualSummaryRows" :key="item.label" class="summary-item">
-                    <span>{{ item.label }}</span>
-                    <strong>{{ item.value }}</strong>
-                  </div>
-                </div>
               </div>
-              <div class="summary-box" v-if="analysisSummaryRows.length">
-                <div class="summary-title">机制分析结论</div>
-                <div class="summary-grid">
-                  <div v-for="item in analysisSummaryRows" :key="item.label" class="summary-item">
-                    <span>{{ item.label }}</span>
-                    <strong>{{ item.value }}</strong>
-                  </div>
-                </div>
-              </div>
-              <div class="response-area"><pre>{{ visualizeResp }}</pre></div>
-            </template>
-            <div class="form-mask" v-if="currentStep < idx">
-              <div class="mask-text">请先完成前置步骤</div>
-            </div>
-            <div class="step-btns">
-              <button type="button" class="btn btn-secondary" @click="goToPrevStep" v-if="currentStep > 0">上一步</button>
-              <button type="button" class="btn btn-primary" @click="goToNextStep" v-if="currentStep < steps.length-1">下一步</button>
-            </div>
-          </div>
+            </form>
+          </template>
+
+          <details class="response-panel" v-if="currentResponseText">
+            <summary>{{ currentResponseTitle }}</summary>
+            <pre>{{ currentResponseText }}</pre>
+          </details>
         </div>
-      </div>
+      </aside>
     </div>
   </div>
 </template>
@@ -526,6 +505,7 @@ function getUploadedRegionName() {
 
 const displayGeojson = computed(() => geojsonData.value || uploadedRegionGeojson.value)
 const selectedRegionFileNames = computed(() => selectedRegionFiles.value.map((file) => file.name))
+const activeTab = computed(() => tabs[currentStep.value] || tabs[0])
 const activeRegionLabel = computed(() => regionOptions.value.find((item) => item.value === preprocessForm.region)?.label || preprocessForm.region || '--')
 const resolvedModelLabel = computed(() => modelLabelMap[regressionResolvedModel.value || regressionForm.model] || (regressionResolvedModel.value || regressionForm.model || '--'))
 const hasGeojsonResult = computed(() => geojsonData.value?.type === 'FeatureCollection' && Array.isArray(geojsonData.value.features))
@@ -646,6 +626,39 @@ const analysisSummaryRows = computed(() => {
     { label: 'Top3 因子', value: sortedFactors || '--' }
   ]
 })
+const insightPanelTitle = computed(() => {
+  if (analysisSummaryRows.value.length) return '机制解读'
+  if (visualSummaryRows.value.length) return '地图输出摘要'
+  if (regressionSummaryRows.value.length) return '回归结果摘要'
+  if (preprocessSummaryRows.value.length || regionUploadRows.value.length) return '数据准备摘要'
+  return '阶段摘要'
+})
+const insightPanelRows = computed(() => {
+  if (analysisSummaryRows.value.length) return analysisSummaryRows.value
+  if (visualSummaryRows.value.length) return visualSummaryRows.value
+  if (regressionSummaryRows.value.length) return regressionSummaryRows.value
+  if (preprocessSummaryRows.value.length) return preprocessSummaryRows.value
+  if (regionUploadRows.value.length) return regionUploadRows.value
+  return []
+})
+const currentResponseTitle = computed(() => {
+  if (activeTab.value.value === 'preprocess') return '预处理与区域上传响应'
+  if (activeTab.value.value === 'regression') return '空间回归响应'
+  if (activeTab.value.value === 'download') return '下载响应'
+  return '可视化与机制分析响应'
+})
+const currentResponseText = computed(() => {
+  if (activeTab.value.value === 'preprocess') {
+    return [regionUploadResp.value, preprocessResp.value].filter(Boolean).join('\n\n')
+  }
+  if (activeTab.value.value === 'regression') {
+    return regressionResp.value
+  }
+  if (activeTab.value.value === 'download') {
+    return [downloadResp.value, csvResp.value].filter(Boolean).join('\n\n')
+  }
+  return visualizeResp.value
+})
 const featureInfoEntries = computed(() => {
   const attrs = selectedFeature.value
   if (!attrs || typeof attrs !== 'object') return []
@@ -666,6 +679,12 @@ const featureInfoEntries = computed(() => {
       value: formatValue(value)
     }))
 })
+
+function getStepStateText(idx) {
+  if (stepStatus[idx]) return '已完成'
+  if (idx === currentStep.value) return '当前进行中'
+  return '等待前序完成'
+}
 
 function downloadTextFile(filename, content, mimeType = 'application/json;charset=utf-8') {
   const blob = new Blob([content], { type: mimeType })
@@ -984,591 +1003,575 @@ function switchToStep(idx) {
 </script>
 
 <style scoped>
-/* 复制 login/1.html 的 <style> 内容到这里，覆盖原有样式 */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+.analysis-page {
   min-height: 100vh;
-  color: #2d3748;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 24%),
+    linear-gradient(180deg, #f4f7fb 0%, #edf2f7 100%);
+  color: #142033;
 }
-.container {
-  max-width: 100vw;
-  margin: 0;
-  padding: 0;
-  min-height: 100vh;
+
+.hero-card,
+.workspace-card,
+.detail-card,
+.workflow-card,
+.control-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(207, 217, 229, 0.9);
+  border-radius: 24px;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
 }
-.gis-summary-row {
+
+.hero-card {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+  gap: 24px;
+  padding: 28px;
   margin-bottom: 24px;
 }
-.gis-summary-card {
-  padding: 18px 20px;
+
+.hero-main h1 {
+  margin: 12px 0 10px;
+  font-size: 2rem;
+  line-height: 1.15;
+  color: #10233f;
+}
+
+.hero-main p {
+  max-width: 760px;
+  color: #526176;
+  line-height: 1.7;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.hero-stat,
+.status-card,
+.strip-item,
+.summary-item,
+.feature-item,
+.mini-card {
+  background: #f8fafc;
+  border: 1px solid #dce5f0;
   border-radius: 18px;
-  background: linear-gradient(135deg, rgba(49, 130, 206, 0.92) 0%, rgba(37, 99, 235, 0.92) 100%);
-  color: #fff;
-  box-shadow: 0 16px 30px rgba(37, 99, 235, 0.22);
+}
+
+.hero-stat {
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.gis-summary-card .label {
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.78);
-}
-.gis-summary-card strong {
-  font-size: 1.05rem;
-}
-.header {
-  text-align: center;
-  margin-bottom: 30px;
-  color: white;
-}
-.header h1 {
-  font-size: 2.5rem;
-  font-weight: 700;
-  margin-bottom: 8px;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-}
-.header p {
-  font-size: 1.1rem;
-  opacity: 0.9;
-}
-.main-content {
-  display: grid;
-  grid-template-columns: 2.5fr 1fr;
-  gap: 30px;
-  height: calc(100vh - 120px);
-}
-.left-panel, .right-panel {
-  height: 100%;
-  min-height: 0;
-}
-.left-panel {
-  background: white;
-  border-radius: 20px;
-  padding: 30px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
-  display: flex;
-  flex-direction: column;
-}
-.right-panel {
-  background: white;
-  border-radius: 20px;
-  padding: 30px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
-  overflow-y: auto;
-}
-.process-indicator {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 30px;
-  position: relative;
-}
-.process-indicator::before {
-  content: '';
-  position: absolute;
-  top: 20px;
-  left: 40px;
-  right: 40px;
-  height: 2px;
-  background: #e2e8f0;
-  z-index: 1;
-}
-.step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  position: relative;
-  z-index: 2;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-.step-circle {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: #e2e8f0;
-  color: #a0aec0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  margin-bottom: 8px;
-  transition: all 0.3s ease;
-}
-.step.active .step-circle {
-  background: #6188e4;
-  color: white;
-  transform: scale(1.1);
-}
-.step.completed .step-circle {
-  background: #10b981;
-  color: white;
-}
-.step.disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.step-label {
-  font-size: 0.85rem;
-  font-weight: 500;
-  text-align: center;
-  color: #64748b;
-  transition: color 0.3s ease;
-}
-.step.active .step-label {
-  color: #4666e5;
-  font-weight: 600;
-}
-.map-section {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: 0;
-}
-.map-container {
-  flex: 1;
-  background: #f8fafc;
-  border-radius: 15px;
-  border: 1px solid #dbeafe;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  position: relative;
-  overflow: hidden;
-  min-height: 0;
-}
-.map-toolbar {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.map-status-panel {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 14px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #eff6ff 0%, #eef2ff 100%);
-  border: 1px solid #c7d2fe;
-}
-.status-head {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: #1e3a8a;
-  font-weight: 700;
-}
-.status-line {
-  padding: 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.78);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: #475569;
-}
-.status-line strong {
-  color: #0f172a;
-}
-.feature-info {
-  background: #f1f5f9;
-  border-radius: 12px;
-  padding: 20px;
-  min-height: 120px;
-}
-.feature-info h3 {
-  color: #1e293b;
-  margin-bottom: 15px;
-  font-size: 1.1rem;
-}
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
-}
-.feature-item {
-  padding: 12px;
-  border-radius: 12px;
-  background: #ffffff;
-  border: 1px solid #dbeafe;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.feature-item span {
-  color: #64748b;
+
+.hero-stat span,
+.status-card span,
+.strip-item span,
+.summary-item span,
+.feature-item span,
+.mini-meta span {
   font-size: 0.82rem;
+  color: #637287;
 }
+
+.hero-stat strong,
+.status-card strong,
+.strip-item strong,
+.summary-item strong,
 .feature-item strong {
-  color: #0f172a;
+  color: #10233f;
+  font-size: 1rem;
   word-break: break-word;
 }
+
+.page-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(360px, 0.9fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.workspace-column,
+.control-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.workspace-card,
+.detail-card,
+.workflow-card,
+.control-card {
+  padding: 24px;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.section-head.compact {
+  margin-bottom: 14px;
+}
+
+.section-head h2,
+.section-head h3 {
+  margin: 0 0 6px;
+  color: #10233f;
+}
+
+.section-head p,
+.upload-head p,
+.mini-card p {
+  margin: 0;
+  color: #637287;
+  line-height: 1.6;
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.action-row.split {
+  justify-content: space-between;
+}
+
+.action-row.end {
+  justify-content: flex-end;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.status-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-stage {
+  min-height: 620px;
+  padding: 12px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #edf4fb 0%, #f8fafc 100%);
+  border: 1px solid #d8e4f2;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.feature-grid,
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.feature-item,
+.summary-item {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .empty-tip {
-  color: #64748b;
-  font-size: 0.92rem;
+  padding: 18px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px dashed #c7d4e3;
+  color: #637287;
+  line-height: 1.6;
 }
-.step-content {
-  display: none;
-  animation: fadeIn 0.3s ease;
+
+.workflow-list {
+  display: grid;
+  gap: 12px;
 }
-.step-content.active {
-  display: block;
-}
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.step-header {
-  margin-bottom: 25px;
-}
-.step-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #1e293b;
-  margin-bottom: 8px;
-}
-.step-description {
-  color: #64748b;
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-.form-group {
-  margin-bottom: 20px;
-}
-.form-label {
-  display: block;
-  margin-bottom: 8px;
-  font-weight: 600;
-  color: #374151;
-  font-size: 0.9rem;
-}
-.form-input, .form-select {
+
+.workflow-step {
   width: 100%;
-  padding: 12px 16px;
-  border: 2px solid #e5e7eb;
-  border-radius: 10px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid #dbe3ef;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.workflow-step:hover:not(:disabled) {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.workflow-step.active {
+  background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%);
+  border-color: #60a5fa;
+}
+
+.workflow-step.done {
+  border-color: #86efac;
+}
+
+.workflow-step.locked {
+  opacity: 0.55;
+}
+
+.workflow-step:disabled {
+  cursor: not-allowed;
+}
+
+.workflow-index {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #10233f;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.workflow-step.active .workflow-index {
+  background: #2563eb;
+}
+
+.workflow-step.done .workflow-index {
+  background: #16a34a;
+}
+
+.workflow-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workflow-copy strong {
+  color: #10233f;
   font-size: 0.95rem;
-  transition: all 0.3s ease;
-  background: white;
 }
-.form-input:focus, .form-select:focus {
+
+.workflow-copy small {
+  color: #637287;
+  font-size: 0.8rem;
+}
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.strip-item {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.control-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.compact-grid {
+  margin-top: 14px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-label {
+  font-size: 0.88rem;
+  color: #334155;
+  font-weight: 600;
+}
+
+.form-input,
+.form-select {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #ced8e5;
+  background: #ffffff;
+  color: #10233f;
+  font-size: 0.94rem;
+  transition: 0.2s ease;
+}
+
+.form-input:focus,
+.form-select:focus {
   outline: none;
-  border-color: #4651e5;
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16);
 }
+
+.upload-box {
+  padding: 18px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #f8fbff 0%, #f1f6fb 100%);
+  border: 1px solid #d8e4f2;
+}
+
+.upload-head {
+  margin-bottom: 14px;
+}
+
+.upload-head h3,
+.mini-card h3 {
+  margin: 0 0 6px;
+  color: #10233f;
+}
+
 .file-upload {
   position: relative;
-  display: inline-block;
-  width: 100%;
 }
+
 .file-upload input[type="file"] {
   position: absolute;
+  inset: 0;
   opacity: 0;
-  width: 100%;
-  height: 100%;
   cursor: pointer;
 }
+
 .file-upload-button {
+  min-height: 48px;
+  padding: 12px 16px;
+  border: 1px dashed #94a3b8;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #334155;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 16px;
-  border: 2px dashed #cbd5e1;
-  border-radius: 10px;
-  background: #f8fafc;
-  color: #64748b;
-  transition: all 0.3s ease;
-  cursor: pointer;
+  font-weight: 600;
 }
-.file-upload-button:hover {
-  border-color: #4f46e5;
-  background: #f0f4ff;
-  color: #4f46e5;
-}
-.file-upload-tip {
-  margin-top: 10px;
-  color: #64748b;
-  font-size: 0.82rem;
-  line-height: 1.5;
-}
+
 .selected-file-list {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }
+
 .file-chip {
   padding: 6px 10px;
   border-radius: 999px;
-  background: #eff6ff;
+  background: #e0ecff;
   color: #1d4ed8;
-  font-size: 0.8rem;
   border: 1px solid #bfdbfe;
+  font-size: 0.8rem;
 }
-.upload-action-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 18px;
-}
+
 .checkbox-group {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  margin-top: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
+
 .checkbox-item {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border: 2px solid #e5e7eb;
-  border-radius: 8px;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #dbe3ef;
+  background: #f8fafc;
+}
+
+.checkbox-item input {
+  margin: 0;
+}
+
+.download-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.mini-card {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mini-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mini-meta span {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eef2f7;
+}
+
+.response-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid #dbe3ef;
+}
+
+.response-panel summary {
   cursor: pointer;
-  transition: all 0.3s ease;
+  color: #10233f;
+  font-weight: 700;
 }
-.checkbox-item:hover {
-  border-color: #4666e5;
-  background: #f0f4ff;
+
+.response-panel pre {
+  margin: 14px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 0.83rem;
+  line-height: 1.6;
+  color: #334155;
+  font-family: 'Consolas', 'Monaco', monospace;
 }
-.checkbox-item input[type="checkbox"] {
-  margin-right: 8px;
-  width: 16px;
-  height: 16px;
-}
-.checkbox-item.checked {
-  border-color: #4676e5;
-  background: #f0f4ff;
-  color: #4683e5;
-}
+
 .btn {
-  padding: 14px 28px;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 14px;
   border: none;
-  border-radius: 10px;
-  font-size: 0.95rem;
-  font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
-  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 600;
+  transition: 0.2s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
 }
+
 .btn-primary {
-  background: linear-gradient(135deg, #6188e4 0%, #3a8bed 100%);
-  color: white;
-  box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3);
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #ffffff;
 }
-.btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(79, 70, 229, 0.4);
-}
+
 .btn-secondary {
-  background: #f1f5f9;
-  color: #64748b;
-  border: 2px solid #e2e8f0;
+  background: #eef2f7;
+  color: #334155;
+  border: 1px solid #d5dee8;
 }
-.btn-secondary:hover {
-  background: #e2e8f0;
-  color: #475569;
-}
+
 .btn-sm {
-  padding: 9px 14px;
+  min-height: 40px;
+  padding: 8px 14px;
   font-size: 0.85rem;
 }
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
-  transform: none !important;
 }
-.response-area {
-  margin-top: 20px;
-  padding: 16px;
-  background: #f8fafc;
-  border-radius: 10px;
-  border-left: 4px solid #c6dff4;
-  font-family: 'Monaco', 'Menlo', monospace;
-  font-size: 0.85rem;
-  max-height: 200px;
-  overflow-y: auto;
-}
-.response-area pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.response-area:empty {
-  display: none;
-}
-.param-meaning {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
-}
-.param-item {
-  padding: 14px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
-  border: 1px solid #dbeafe;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.param-item strong {
-  color: #1d4ed8;
-  font-size: 0.88rem;
-}
-.param-item span {
-  color: #475569;
-  font-size: 0.88rem;
-  line-height: 1.5;
-}
-.summary-box {
-  margin-top: 18px;
-  padding: 16px;
-  border-radius: 16px;
-  background: #f8fbff;
-  border: 1px solid #dbeafe;
-}
-.summary-title {
-  margin-bottom: 12px;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #1e3a8a;
-}
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
-}
-.summary-item {
-  padding: 12px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.summary-item span {
-  color: #64748b;
-  font-size: 0.82rem;
-}
-.summary-item strong {
-  color: #0f172a;
-  word-break: break-word;
-}
-.progress-bar {
-  width: 100%;
-  height: 6px;
-  background: #e2e8f0;
-  border-radius: 3px;
-  overflow: hidden;
-  margin: 20px 0;
-}
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #4669e5, #3a49ed);
-  width: 0%;
-  transition: width 0.3s ease;
-}
-.status-success {
-  color: #10b981;
-  background: #ecfdf5;
-  border-color: #10b981;
-}
-.status-error {
-  color: #ef4444;
-  background: #fef2f2;
-  border-color: #ef4444;
-}
-@media (max-width: 1024px) {
-  .gis-summary-row {
+
+@media (max-width: 1180px) {
+  .hero-card,
+  .page-grid,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .main-content {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(520px, 56vh) 1fr;
-    height: auto;
-  }
-  .process-indicator {
-    flex-wrap: wrap;
-    gap: 15px;
-  }
-  .step {
-    flex: 1;
-    min-width: 80px;
-  }
-  .left-panel, .right-panel {
-    height: auto;
-  }
 }
+
 @media (max-width: 768px) {
-  .container {
-    padding: 15px;
+  .analysis-page {
+    padding: 16px;
   }
-  .gis-summary-row {
-    grid-template-columns: 1fr;
+
+  .hero-card,
+  .workspace-card,
+  .detail-card,
+  .workflow-card,
+  .control-card {
+    padding: 18px;
+    border-radius: 20px;
   }
-  .header h1 {
-    font-size: 2rem;
-  }
-  .left-panel, .right-panel {
-    padding: 20px;
-  }
-  .map-status-panel,
+
+  .hero-stats,
+  .status-grid,
+  .feature-grid,
   .summary-grid,
-  .param-meaning,
-  .feature-grid {
+  .summary-strip,
+  .form-grid,
+  .checkbox-group {
     grid-template-columns: 1fr;
   }
-}
-.card {
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 4px 24px rgba(79,70,229,0.07);
-  padding: 28px 24px 20px 24px;
-  position: relative;
-  margin-bottom: 18px;
-}
-.form-mask {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(255,255,255,0.7);
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.1rem;
-  color: #467be5;
-  border-radius: 16px;
-  pointer-events: all;
-}
-.step-btns {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 18px;
-}
-@media (max-width: 768px) {
-  .process-indicator {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
+
+  .action-row.split,
+  .action-row.end {
+    justify-content: stretch;
   }
-  .step {
-    flex-direction: row;
-    align-items: center;
+
+  .action-row.split .btn,
+  .action-row.end .btn,
+  .mini-card .btn {
+    width: 100%;
+  }
+
+  .map-stage {
+    min-height: 420px;
   }
 }
 </style>
